@@ -1,0 +1,21 @@
+[project]
+name = "bilibot"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "bilibili-api-python>=17.4.1",
+    "faster-whisper>=1.2.1",
+    "httpx>=0.28.1",
+    "openai>=2.32.0",
+    "python-dotenv>=1.2.2",
+    "rich>=15.0.0",
+    "yt-dlp>=2026.3.17",
+]
+
+[project.scripts]
+bilibot = "bilibot.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
