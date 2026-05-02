@@ -33,6 +33,9 @@ console = Console()
 
 
 def main(argv: list[str] | None = None) -> int:
+    import sys
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     argv = _normalize_argv(list(sys.argv[1:] if argv is None else argv))
     parser = build_parser()
     args = parser.parse_args(argv)
