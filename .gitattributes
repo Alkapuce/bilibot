@@ -1,0 +1,25 @@
+# 所有文本文件强制 LF，保证 Linux/Windows 一致
+* text=auto eol=lf
+
+# Python 源码
+*.py text eol=lf
+
+# 配置/文档
+*.toml text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+.env.example text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+# 锁文件
+uv.lock text eol=lf
+
+# 二进制
+*.mp3 binary
+*.m4a binary
+*.wav binary
+*.m4s binary
+*.mp4 binary
