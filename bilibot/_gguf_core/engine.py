@@ -147,9 +147,16 @@ class QwenASREngine:
                     logger.debug(f"stream: {re.sub(r'([，。？！：,\.])', r'\1\n', piece)}")
                     stable_text_acc += piece
             
-            # 熔断检查：检测重复循环
+            # 熔断检查1：token 级重复
             if len(stable_tokens) > 15:
                 if len(set(stable_tokens[-15:])) <= 3:
+                    result.is_aborted = True
+                    break
+
+            # 熔断检查2：文本级重复 (≥10字且最近3句完全相同)
+            if len(stable_text_acc) > 30 and n_gen_tokens > 50:
+                lines = [l for l in re.split(r'[。，？！\n.,!?]', stable_text_acc) if len(l.strip()) >= 6]
+                if len(lines) >= 4 and lines[-1] == lines[-2] == lines[-3]:
                     result.is_aborted = True
                     break
             

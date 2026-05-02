@@ -118,19 +118,19 @@ def transcribe(
     emit(progress, "task_start", "asr_model_load", f"加载 Qwen3-ASR GGUF 模型: {model_dir}")
 
     engine = _create_engine_qwen_asr_gguf(model_dir, files, settings)
-    engine_ok = False
-    if engine:
-        engine_ok = True
     if not engine:
         engine = _create_engine_standalone(model_dir, files, settings)
+    if not engine:
+        raise RuntimeError("无法初始化 GGUF 引擎")
 
-    emit(progress, "task_done", "asr_model_load", f"Qwen3-ASR GGUF 已加载 ({'caps' if engine_ok else 'standalone'})")
+    emit(progress, "task_done", "asr_model_load", f"Qwen3-ASR GGUF 已加载")
 
     language = _map_lang(settings.language)
 
     emit(progress, "task_start", "asr_transcribe", "Qwen3-ASR GGUF 识别中")
     result = engine.transcribe(audio_file=audio_path, language=language, temperature=0.4)
-    text = result.text.strip()
+    text = _trim_repetition(result.text.strip())
+    emit(progress, "task_done", "asr_transcribe", f"Qwen3-ASR GGUF 完成: {len(text)} 字符")
     emit(progress, "task_done", "asr_transcribe", f"Qwen3-ASR GGUF 完成: {len(text)} 字符")
 
     return Transcript(
@@ -189,14 +189,14 @@ def _create_engine_qwen_asr_gguf(
             encoder_frontend_fn=Path(files["encoder_frontend"]).name,
             encoder_backend_fn=Path(files["encoder_backend"]).name,
             llm_fn=Path(files["llm"]).name,
-            vulkan_enable=True, chunk_size=40.0, n_ctx=2048, verbose=False,
+            vulkan_enable=True, chunk_size=25.0, n_ctx=2048, memory_num=2, verbose=False,
         )
         wrapper = create_asr_engine(
             model_dir=str(model_dir),
             encoder_frontend_fn=Path(files["encoder_frontend"]).name,
             encoder_backend_fn=Path(files["encoder_backend"]).name,
             llm_fn=Path(files["llm"]).name,
-            vulkan_enable=True, chunk_size=40.0, n_ctx=2048, verbose=False,
+            vulkan_enable=True, chunk_size=25.0, n_ctx=2048, memory_num=2, verbose=False,
         )
         return wrapper.engine
     except Exception as exc:
@@ -208,29 +208,33 @@ def _create_engine_standalone(
     model_dir: Path,
     files: dict[str, str],
     settings: Settings,
-):
+) -> object | None:
     try:
         import numpy  # noqa: F401
         import onnxruntime  # noqa: F401
         import gguf  # noqa: F401
-    except ImportError as e:
-        raise RuntimeError(
-            f"GGUF 后端缺少依赖 ({e})。请运行:\n  uv sync --extra gguf"
-        )
+    except ImportError:
+        return None
 
     from ._gguf_core import QwenASREngine, ASREngineConfig, set_lib_dir, init_llama_lib
 
-    set_lib_dir(_resolve_llama_bin(settings))
-    init_llama_lib()
+    try:
+        set_lib_dir(_resolve_llama_bin(settings))
+        init_llama_lib()
+    except Exception:
+        return None
 
-    config = ASREngineConfig(
-        model_dir=str(model_dir),
-        encoder_frontend_fn=Path(files["encoder_frontend"]).name,
-        encoder_backend_fn=Path(files["encoder_backend"]).name,
-        llm_fn=Path(files["llm"]).name,
-        vulkan_enable=True, chunk_size=40.0, n_ctx=2048, verbose=False,
-    )
-    return QwenASREngine(config)
+    try:
+        config = ASREngineConfig(
+            model_dir=str(model_dir),
+            encoder_frontend_fn=Path(files["encoder_frontend"]).name,
+            encoder_backend_fn=Path(files["encoder_backend"]).name,
+            llm_fn=Path(files["llm"]).name,
+            vulkan_enable=True, chunk_size=25.0, n_ctx=2048, memory_num=2, verbose=False,
+        )
+        return QwenASREngine(config)
+    except Exception:
+        return None
 
 
 def _find_qwen_asr_gguf_module() -> Path | None:
@@ -256,3 +260,28 @@ def _map_lang(language: str | None) -> str | None:
     if language in lang_map:
         return lang_map[language]
     return language.capitalize()
+
+
+def _trim_repetition(text: str) -> str:
+    import re
+
+    lines = re.split(r'([。！？\n.!?])', text)
+    if len(lines) < 5:
+        return text
+    chunks = [lines[i] + (lines[i + 1] if i + 1 < len(lines) else "") for i in range(0, len(lines) - 1, 2)]
+    chunks = [c for c in chunks if len(c.strip()) >= 4]
+
+    for i in range(len(chunks) - 4, -1, -1):
+        head = chunks[i].strip()
+        count = 0
+        for j in range(i, len(chunks)):
+            if chunks[j].strip() == head:
+                count += 1
+            else:
+                break
+        if count >= 3:
+            text = ""
+            for k in range(i):
+                text += chunks[k]
+            return text
+    return text
