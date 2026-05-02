@@ -3,26 +3,25 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .config import Settings
 from .extractor import VideoInfo, extract
-from .models import Transcript, TranscriptSegment
-from .storage import save_artifacts
+from .models import Transcript, TranscriptSegment, optional_float
+from .postprocessor import postprocess_transcript
+from .progress import ProgressCallback, emit
+from .storage import save_notes_artifact, save_transcript_artifacts
 from .summarizer import render_basic_notes, summarize_video
 from .transcriber import transcribe_url
-
-
-ProgressCallback = Callable[[str], None]
 
 
 @dataclass
 class PipelineResult:
     info: VideoInfo
     transcript: Transcript
+    raw_transcript: Transcript | None
     notes: str
     paths: dict[str, Path]
 
@@ -35,47 +34,71 @@ def analyze_url(
     no_llm: bool = False,
     progress: ProgressCallback | None = None,
 ) -> PipelineResult:
-    report = progress or (lambda _message: None)
-
-    report("获取视频信息和 B站字幕")
+    emit(progress, "task_start", "metadata", "获取视频信息和 B站字幕")
     info = extract(
         url,
         sessdata=settings.bili_sessdata,
         bili_jct=settings.bili_jct,
         buvid3=settings.bili_buvid3,
+        progress=progress,
+    )
+    emit(
+        progress,
+        "task_done",
+        "metadata",
+        f"视频信息获取完成：{info.bvid}，字幕轨道 {len(info.subtitles)} 条",
     )
 
     transcript = None
     if not force_asr:
         subtitle = select_subtitle(info.subtitles, preferred_language=settings.language)
         if subtitle:
-            report("使用 B站已有字幕")
+            emit(
+                progress,
+                "log",
+                "subtitle",
+                f"使用 B站已有字幕：{subtitle.get('lan') or subtitle.get('lan_code') or 'unknown'}",
+            )
             transcript = transcript_from_subtitle(subtitle)
 
     if transcript is None:
-        report("未找到可用字幕，下载音频并进行语音转文本")
-        transcript = transcribe_url(
-            info.url,
-            cookie_file=settings.cookie_file,
-            language=settings.language,
-            model_name=settings.whisper_model,
-            device=settings.whisper_device,
-            compute_type=settings.whisper_compute_type,
-            sessdata=settings.bili_sessdata,
-            bili_jct=settings.bili_jct,
-            buvid3=settings.bili_buvid3,
-        )
+        emit(progress, "log", "subtitle", "未找到可用字幕，下载音频并进行语音转文本")
+        transcript = transcribe_url(info.url, settings, progress=progress)
+
+    raw_transcript = transcript
+    if settings.subtitle_postprocess:
+        transcript = postprocess_transcript(info, transcript, settings, progress=progress)
+
+    emit(progress, "task_start", "storage", "写入字幕/转录文件")
+    transcript_paths = save_transcript_artifacts(
+        settings.output_dir,
+        info,
+        transcript,
+        raw_transcript=raw_transcript if transcript.postprocessed else None,
+    )
+    emit(progress, "task_done", "storage", "字幕/转录文件写入完成")
 
     if no_llm:
-        report("跳过 LLM 总结")
+        emit(progress, "log", "llm_summarize", "跳过 LLM 总结")
         notes = render_basic_notes(info, transcript)
     else:
-        report("调用 LLM 生成笔记")
-        notes = summarize_video(info, transcript, settings)
+        try:
+            notes = summarize_video(info, transcript, settings, progress=progress)
+        except Exception as exc:
+            emit(progress, "log", "llm_summarize", f"LLM 总结失败: {exc}")
+            notes = render_basic_notes(info, transcript)
 
-    report("写入输出文件")
-    paths = save_artifacts(settings.output_dir, info, transcript, notes)
-    return PipelineResult(info=info, transcript=transcript, notes=notes, paths=paths)
+    emit(progress, "task_start", "storage", "写入笔记文件")
+    notes_path = save_notes_artifact(settings.output_dir, info.bvid, notes)
+    emit(progress, "task_done", "storage", "笔记文件写入完成")
+    paths = {**transcript_paths, "notes": notes_path}
+    return PipelineResult(
+        info=info,
+        transcript=transcript,
+        raw_transcript=raw_transcript if transcript.postprocessed else None,
+        notes=notes,
+        paths=paths,
+    )
 
 
 def select_subtitle(subtitles: list[dict[str, Any]], preferred_language: str = "zh") -> dict[str, Any] | None:
@@ -98,7 +121,7 @@ def transcript_from_subtitle(subtitle: dict[str, Any]) -> Transcript:
     segments = [
         TranscriptSegment(
             start=float(item.get("start", 0)),
-            end=_optional_float(item.get("end")),
+            end=optional_float(item.get("end")),
             text=str(item.get("text", "")).strip(),
         )
         for item in subtitle.get("segments", [])
@@ -130,9 +153,3 @@ def _parse_subtitle_content(content: str) -> list[TranscriptSegment]:
         elif line.strip():
             segments.append(TranscriptSegment(start=0.0, text=line.strip()))
     return segments
-
-
-def _optional_float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    return float(value)

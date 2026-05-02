@@ -6,6 +6,7 @@ from .config import Settings
 from .extractor import VideoInfo
 from .llm import LLMClient
 from .models import Transcript, format_timestamp
+from .progress import ProgressCallback, emit
 
 
 SYSTEM_PROMPT = """你是一个严谨的视频学习笔记助手。你的任务是根据视频信息和字幕生成中文笔记。
@@ -49,7 +50,13 @@ def split_text(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
-def summarize_video(info: VideoInfo, transcript: Transcript, settings: Settings) -> str:
+def summarize_video(
+    info: VideoInfo,
+    transcript: Transcript,
+    settings: Settings,
+    *,
+    progress: ProgressCallback | None = None,
+) -> str:
     llm = LLMClient(settings)
     transcript_text = transcript.text.strip()
     if not transcript_text:
@@ -57,12 +64,28 @@ def summarize_video(info: VideoInfo, transcript: Transcript, settings: Settings)
 
     chunks = split_text(transcript_text, settings.chunk_chars)
     if len(chunks) == 1:
-        return _summarize_single(llm, info, transcript, chunks[0])
+        emit(progress, "task_start", "llm_summarize", f"生成笔记：{settings.llm_model}", total=1)
+        notes = _summarize_single(llm, info, transcript, chunks[0])
+        emit(progress, "task_done", "llm_summarize", "笔记生成完成")
+        return notes
 
     partial_notes = []
+    emit(
+        progress,
+        "task_start",
+        "llm_summarize",
+        f"分块生成笔记：{settings.llm_model}",
+        total=len(chunks) + 1,
+        unit="chunk",
+    )
     for index, chunk in enumerate(chunks, start=1):
+        emit(progress, "task_update", "llm_summarize", f"总结分块 {index}/{len(chunks)}")
         partial_notes.append(_summarize_chunk(llm, info, transcript, chunk, index, len(chunks)))
-    return _merge_notes(llm, info, transcript, partial_notes)
+        emit(progress, "task_update", "llm_summarize", f"总结分块 {index}/{len(chunks)}", advance=1)
+    emit(progress, "task_update", "llm_summarize", "合并分块笔记")
+    notes = _merge_notes(llm, info, transcript, partial_notes)
+    emit(progress, "task_done", "llm_summarize", "笔记生成完成")
+    return notes
 
 
 def render_basic_notes(info: VideoInfo, transcript: Transcript, reason: str = "") -> str:

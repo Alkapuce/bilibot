@@ -24,6 +24,8 @@ class Transcript:
     source: TranscriptSource
     language: str
     segments: list[TranscriptSegment] = field(default_factory=list)
+    postprocessed: bool = False
+    postprocess_model: str = ""
 
     @property
     def text(self) -> str:
@@ -37,6 +39,7 @@ class Transcript:
             f"- Source: {source_label}",
             f"- Language: {self.language or 'unknown'}",
             f"- Segments: {len(self.segments)}",
+            f"- Postprocessed: {'yes' if self.postprocessed else 'no'}",
             "",
             "## Full Text",
             "",
@@ -67,3 +70,9 @@ def jsonable(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: jsonable(item) for key, item in value.items()}
     return value
+
+
+def optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    return float(value)

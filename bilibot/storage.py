@@ -17,19 +17,48 @@ def output_root(base_dir: Path, bvid: str) -> Path:
     return path
 
 
-def save_artifacts(base_dir: Path, info: VideoInfo, transcript: Transcript, notes: str) -> dict[str, Path]:
+def save_transcript_artifacts(
+    base_dir: Path,
+    info: VideoInfo,
+    transcript: Transcript,
+    *,
+    raw_transcript: Transcript | None = None,
+) -> dict[str, Path]:
     root = output_root(base_dir, info.bvid)
-    paths = {
+    paths: dict[str, Path] = {
         "metadata": root / "metadata.json",
         "transcript_json": root / "transcript.json",
         "transcript_md": root / "transcript.md",
-        "notes": root / "notes.md",
     }
-
     _write_json(paths["metadata"], _metadata_payload(info))
     _write_json(paths["transcript_json"], transcript.to_dict())
     paths["transcript_md"].write_text(transcript.to_markdown(), encoding="utf-8")
-    paths["notes"].write_text(notes.rstrip() + "\n", encoding="utf-8")
+    if raw_transcript is not None:
+        paths["transcript_raw_json"] = root / "transcript_raw.json"
+        paths["transcript_raw_md"] = root / "transcript_raw.md"
+        _write_json(paths["transcript_raw_json"], raw_transcript.to_dict())
+        paths["transcript_raw_md"].write_text(raw_transcript.to_markdown(), encoding="utf-8")
+    return paths
+
+
+def save_notes_artifact(base_dir: Path, bvid: str, notes: str) -> Path:
+    root = output_root(base_dir, bvid)
+    path = root / "notes.md"
+    path.write_text(notes.rstrip() + "\n", encoding="utf-8")
+    return path
+
+
+def save_artifacts(
+    base_dir: Path,
+    info: VideoInfo,
+    transcript: Transcript,
+    notes: str,
+    *,
+    raw_transcript: Transcript | None = None,
+) -> dict[str, Path]:
+    paths = save_transcript_artifacts(base_dir, info, transcript, raw_transcript=raw_transcript)
+    notes_path = save_notes_artifact(base_dir, info.bvid, notes)
+    paths["notes"] = notes_path
     return paths
 
 

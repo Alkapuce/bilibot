@@ -1,6 +1,7 @@
 """Run bilibot as a module."""
 
+import sys
+
 from .cli import main
 
-
-raise SystemExit(main())
+sys.exit(main())

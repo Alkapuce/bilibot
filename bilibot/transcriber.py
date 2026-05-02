@@ -1,5 +1,7 @@
 """Download audio and transcribe with faster-whisper."""
 
+from __future__ import annotations
+
 import asyncio
 import os
 import subprocess
@@ -10,8 +12,11 @@ from typing import Any
 import httpx
 from bilibili_api import Credential, video
 
+from .asr import AsrPlan, resolve_asr_plan
+from .config import Settings
 from .extractor import parse_bvid
 from .models import Transcript, TranscriptSegment
+from .progress import ProgressCallback, emit
 
 
 DEFAULT_USER_AGENT = (
@@ -29,6 +34,13 @@ def download_audio(
     sessdata: str = "",
     bili_jct: str = "",
     buvid3: str = "",
+    *,
+    timeout: float = 60.0,
+    chunk_size: int = 1024 * 1024,
+    yt_dlp_format: str = "bestaudio",
+    yt_dlp_audio_format: str = "mp3",
+    yt_dlp_audio_quality: str = "5",
+    progress: ProgressCallback | None = None,
 ) -> str:
     """Download the best available audio and return the local media path."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -50,13 +62,24 @@ def download_audio(
                     sessdata=sessdata,
                     bili_jct=bili_jct,
                     buvid3=buvid3,
+                    timeout=timeout,
+                    chunk_size=chunk_size,
+                    progress=progress,
                 )
             )
         except Exception as exc:
             errors.append(f"B站直链下载失败：{exc}")
 
     try:
-        return download_audio_with_ytdlp(url, output_dir, cookie_file)
+        return download_audio_with_ytdlp(
+            url,
+            output_dir,
+            cookie_file,
+            yt_dlp_format=yt_dlp_format,
+            yt_dlp_audio_format=yt_dlp_audio_format,
+            yt_dlp_audio_quality=yt_dlp_audio_quality,
+            progress=progress,
+        )
     except Exception as exc:
         message = str(exc)
         if "HTTP Error 412" in message:
@@ -78,13 +101,20 @@ async def download_bilibili_audio(
     sessdata: str = "",
     bili_jct: str = "",
     buvid3: str = "",
+    timeout: float = 60.0,
+    chunk_size: int = 1024 * 1024,
+    progress: ProgressCallback | None = None,
 ) -> str:
     """Download Bilibili audio through bilibili-api-python play URLs."""
     cookie_values = _load_bili_cookie_values(cookie_file)
     sessdata = sessdata or cookie_values.get("SESSDATA", "")
     bili_jct = bili_jct or cookie_values.get("bili_jct", "")
     buvid3 = buvid3 or cookie_values.get("buvid3", "")
-    credential = Credential(sessdata=sessdata, bili_jct=bili_jct, buvid3=buvid3) if sessdata else None
+    credential = (
+        Credential(sessdata=sessdata, bili_jct=bili_jct, buvid3=buvid3)
+        if sessdata
+        else None
+    )
 
     v = video.Video(bvid=bvid, credential=credential)
     info = await v.get_info()
@@ -95,11 +125,23 @@ async def download_bilibili_audio(
     play_url = await v.get_download_url(cid=cid, html5=False)
     audio = _select_dash_audio(play_url)
     referer = f"https://www.bilibili.com/video/{bvid}"
-    headers = _bili_download_headers(referer, sessdata=sessdata, bili_jct=bili_jct, buvid3=buvid3)
+    headers = _bili_download_headers(
+        referer,
+        sessdata=sessdata,
+        bili_jct=bili_jct,
+        buvid3=buvid3,
+    )
 
     if audio:
         path = Path(output_dir) / "audio.m4s"
-        await _download_first_available(_media_urls(audio), path, headers)
+        await _download_first_available(
+            _media_urls(audio),
+            path,
+            headers,
+            timeout,
+            chunk_size,
+            progress,
+        )
         return str(path)
 
     # Some videos expose only a single progressive stream. It is larger than
@@ -110,11 +152,27 @@ async def download_bilibili_audio(
         raise RuntimeError("播放地址中没有 DASH 音频或可用 durl")
 
     path = Path(output_dir) / "audio.mp4"
-    await _download_first_available(_media_urls(durl), path, headers)
+    await _download_first_available(
+        _media_urls(durl),
+        path,
+        headers,
+        timeout,
+        chunk_size,
+        progress,
+    )
     return str(path)
 
 
-def download_audio_with_ytdlp(url: str, output_dir: str, cookie_file: str = "") -> str:
+def download_audio_with_ytdlp(
+    url: str,
+    output_dir: str,
+    cookie_file: str = "",
+    *,
+    yt_dlp_format: str = "bestaudio",
+    yt_dlp_audio_format: str = "mp3",
+    yt_dlp_audio_quality: str = "5",
+    progress: ProgressCallback | None = None,
+) -> str:
     """Download best audio from URL using yt-dlp, return path to audio file."""
     out_template = os.path.join(output_dir, "audio.%(ext)s")
     cmd = [
@@ -125,12 +183,12 @@ def download_audio_with_ytdlp(url: str, output_dir: str, cookie_file: str = "") 
         "--referer",
         "https://www.bilibili.com/",
         "-f",
-        "bestaudio",
+        yt_dlp_format,
         "--extract-audio",
         "--audio-format",
-        "mp3",
+        yt_dlp_audio_format,
         "--audio-quality",
-        "5",
+        yt_dlp_audio_quality,
         "-o",
         out_template,
         url,
@@ -138,30 +196,82 @@ def download_audio_with_ytdlp(url: str, output_dir: str, cookie_file: str = "") 
     if cookie_file and os.path.exists(cookie_file):
         cmd += ["--cookies", cookie_file]
 
+    emit(progress, "task_start", "download_audio", "使用 yt-dlp 下载音频")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        emit(progress, "task_done", "download_audio", "yt-dlp 下载失败")
         raise RuntimeError(f"yt-dlp failed:\n{result.stderr}")
 
     for f in Path(output_dir).glob("audio.*"):
+        emit(progress, "task_done", "download_audio", f"yt-dlp 下载完成：{f.name}")
         return str(f)
+    emit(progress, "task_done", "download_audio", "yt-dlp 未生成音频文件")
     raise FileNotFoundError("yt-dlp did not produce an audio file")
 
 
 def transcribe(
     audio_path: str,
-    language: str = "zh",
-    model_name: str = "base",
-    device: str = "cpu",
-    compute_type: str = "int8",
+    settings: Settings,
+    *,
+    plan: AsrPlan | None = None,
+    progress: ProgressCallback | None = None,
 ) -> Transcript:
     """Transcribe an audio file using faster-whisper."""
-    from faster_whisper import WhisperModel
+    from faster_whisper import BatchedInferencePipeline, WhisperModel
 
-    print(f"[transcriber] loading Whisper {model_name} model ({device}, {compute_type})...")
-    model = WhisperModel(model_name, device=device, compute_type=compute_type)
+    plan = plan or resolve_asr_plan(settings)
+    emit(progress, "log", "asr_plan", plan.reason)
+    emit(
+        progress,
+        "task_start",
+        "asr_model_load",
+        f"加载 ASR 模型：{plan.model} ({plan.device}, {plan.compute_type})",
+    )
+    model = WhisperModel(
+        plan.model,
+        device=plan.device,
+        compute_type=plan.compute_type,
+        cpu_threads=settings.asr_cpu_threads,
+        num_workers=settings.asr_num_workers,
+        download_root=settings.asr_download_root or None,
+        local_files_only=settings.asr_local_files_only,
+    )
+    emit(progress, "task_done", "asr_model_load", f"ASR 模型已加载：{plan.model}")
 
-    print(f"[transcriber] transcribing {audio_path} ...")
-    segments, info = model.transcribe(audio_path, language=language, beam_size=5)
+    transcribe_kwargs: dict[str, Any] = {
+        "language": settings.language or None,
+        "task": settings.asr_task,
+        "beam_size": settings.asr_beam_size,
+        "condition_on_previous_text": plan.condition_on_previous_text,
+        "vad_filter": plan.vad_filter,
+        "without_timestamps": False,
+    }
+    if settings.asr_vad_min_silence_ms is not None:
+        transcribe_kwargs["vad_parameters"] = {
+            "min_silence_duration_ms": settings.asr_vad_min_silence_ms
+        }
+    if settings.asr_hotwords:
+        transcribe_kwargs["hotwords"] = settings.asr_hotwords
+    if settings.asr_initial_prompt:
+        transcribe_kwargs["initial_prompt"] = settings.asr_initial_prompt
+
+    runner: Any = model
+    if plan.batch_size > 1:
+        runner = BatchedInferencePipeline(model=model)
+        transcribe_kwargs["batch_size"] = plan.batch_size
+
+    emit(progress, "task_start", "asr_transcribe", "语音识别中")
+    segments, info = runner.transcribe(audio_path, **transcribe_kwargs)
+    duration = float(getattr(info, "duration", 0.0) or 0.0)
+    if duration > 0:
+        emit(
+            progress,
+            "task_update",
+            "asr_transcribe",
+            "语音识别中",
+            total=duration,
+            completed=0,
+        )
 
     transcript_segments = []
     for seg in segments:
@@ -171,46 +281,63 @@ def transcribe(
         transcript_segments.append(
             TranscriptSegment(start=float(seg.start), end=float(seg.end), text=text)
         )
+        if duration > 0:
+            emit(
+                progress,
+                "task_update",
+                "asr_transcribe",
+                "语音识别中",
+                completed=min(float(seg.end), duration),
+            )
+        else:
+            emit(progress, "task_update", "asr_transcribe", "语音识别中", advance=1)
 
     detected = info.language
-    print(f"[transcriber] detected language: {detected}, segments: {len(transcript_segments)}")
+    emit(
+        progress,
+        "task_done",
+        "asr_transcribe",
+        f"语音识别完成：{detected}，{len(transcript_segments)} 段",
+    )
     return Transcript(source="whisper", language=detected, segments=transcript_segments)
 
 
 def transcribe_url(
     url: str,
-    cookie_file: str = "",
-    language: str = "zh",
-    model_name: str = "base",
-    device: str = "cpu",
-    compute_type: str = "int8",
-    sessdata: str = "",
-    bili_jct: str = "",
-    buvid3: str = "",
+    settings: Settings,
+    *,
+    progress: ProgressCallback | None = None,
 ) -> Transcript:
     """Download audio and return structured transcript."""
+    plan = resolve_asr_plan(settings)
     with tempfile.TemporaryDirectory() as tmpdir:
-        print("[transcriber] downloading audio...")
+        emit(progress, "log", "download_audio", "准备下载音频")
         audio_path = download_audio(
             url,
             tmpdir,
-            cookie_file,
-            sessdata=sessdata,
-            bili_jct=bili_jct,
-            buvid3=buvid3,
+            settings.cookie_file,
+            sessdata=settings.bili_sessdata,
+            bili_jct=settings.bili_jct,
+            buvid3=settings.bili_buvid3,
+            timeout=settings.download_timeout,
+            chunk_size=settings.download_chunk_size,
+            yt_dlp_format=settings.yt_dlp_format,
+            yt_dlp_audio_format=settings.yt_dlp_audio_format,
+            yt_dlp_audio_quality=settings.yt_dlp_audio_quality,
+            progress=progress,
         )
         return transcribe(
             audio_path,
-            language=language,
-            model_name=model_name,
-            device=device,
-            compute_type=compute_type,
+            settings,
+            plan=plan,
+            progress=progress,
         )
 
 
 def get_transcript(url: str, cookie_file: str = "") -> str:
     """Download audio and return transcript text."""
-    return transcribe_url(url, cookie_file=cookie_file).text
+    settings = Settings(cookie_file=cookie_file)
+    return transcribe_url(url, settings).text
 
 
 def _first_cid(info: dict[str, Any]) -> int | None:
@@ -244,29 +371,65 @@ def _media_urls(media: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(urls))
 
 
-async def _download_first_available(urls: list[str], path: Path, headers: dict[str, str]) -> None:
+async def _download_first_available(
+    urls: list[str],
+    path: Path,
+    headers: dict[str, str],
+    timeout: float,
+    chunk_size: int,
+    progress: ProgressCallback | None,
+) -> None:
     if not urls:
         raise RuntimeError("没有可下载的媒体 URL")
 
     last_error: Exception | None = None
-    async with httpx.AsyncClient(follow_redirects=True, timeout=60, headers=headers) as client:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=headers) as client:
         for media_url in urls:
             try:
                 async with client.stream("GET", media_url) as response:
                     response.raise_for_status()
+                    total = _content_length(response)
+                    emit(
+                        progress,
+                        "task_start",
+                        "download_audio",
+                        f"下载音频：{path.name}",
+                        total=total,
+                        unit="bytes",
+                    )
                     with path.open("wb") as output:
-                        async for chunk in response.aiter_bytes(1024 * 1024):
+                        async for chunk in response.aiter_bytes(chunk_size):
                             if chunk:
                                 output.write(chunk)
+                                emit(
+                                    progress,
+                                    "task_update",
+                                    "download_audio",
+                                    f"下载音频：{path.name}",
+                                    advance=len(chunk),
+                                )
 
                 if path.stat().st_size <= 0:
                     raise RuntimeError("下载文件为空")
+                emit(progress, "task_done", "download_audio", f"音频下载完成：{path.name}")
                 return
             except Exception as exc:
                 last_error = exc
+                emit(progress, "log", "download_audio", f"音频 URL 下载失败：{exc}")
                 path.unlink(missing_ok=True)
 
+    emit(progress, "task_done", "download_audio", "音频下载失败")
     raise RuntimeError(f"所有媒体 URL 下载失败，最后错误：{last_error}")
+
+
+def _content_length(response: httpx.Response) -> float | None:
+    raw = response.headers.get("content-length", "")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
 
 
 def _bili_download_headers(

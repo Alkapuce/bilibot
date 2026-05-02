@@ -1,11 +1,16 @@
 """Extract video metadata and subtitles from Bilibili."""
 
+from __future__ import annotations
+
 import asyncio
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from bilibili_api import Credential, video
+
+from .models import optional_float
+from .progress import ProgressCallback, emit
 
 
 @dataclass
@@ -53,7 +58,11 @@ def _clean_video_input(value: str) -> str:
     return str(value).strip().strip("'\"“”‘’`<>")
 
 
-async def _fetch(bvid: str, credential: Credential | None = None) -> VideoInfo:
+async def _fetch(
+    bvid: str,
+    credential: Credential | None = None,
+    progress: ProgressCallback | None = None,
+) -> VideoInfo:
     v = video.Video(bvid=bvid, credential=credential)
     info = await v.get_info()
 
@@ -64,15 +73,22 @@ async def _fetch(bvid: str, credential: Credential | None = None) -> VideoInfo:
     cover = info.get("pic", "")
     url = f"https://www.bilibili.com/video/{bvid}"
 
-    vi = VideoInfo(bvid=bvid, title=title, author=author,
-                   desc=desc, duration=duration, url=url, cover=cover)
+    vi = VideoInfo(
+        bvid=bvid,
+        title=title,
+        author=author,
+        desc=desc,
+        duration=duration,
+        url=url,
+        cover=cover,
+    )
 
     # Try to get subtitles
     try:
-        subtitles = await _fetch_subtitles(v, info, credential)
+        subtitles = await _fetch_subtitles(v, info, credential, progress)
         vi.subtitles = subtitles
     except Exception as e:
-        print(f"[extractor] subtitle fetch failed: {e}")
+        emit(progress, "log", "metadata", f"字幕列表获取失败：{e}")
 
     return vi
 
@@ -81,6 +97,7 @@ async def _fetch_subtitles(
     v: video.Video,
     info: dict[str, Any],
     credential: Credential | None = None,
+    progress: ProgressCallback | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch CC subtitles for all available languages."""
     results = []
@@ -112,7 +129,7 @@ async def _fetch_subtitles(
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:
-                print(f"[extractor] failed to fetch subtitle {lan}: {e}")
+                emit(progress, "log", "metadata", f"字幕轨道获取失败：{lan}，{e}")
                 continue
 
             body = data.get("body", [])
@@ -124,7 +141,7 @@ async def _fetch_subtitles(
                 segments.append(
                     {
                         "start": float(item.get("from", 0)),
-                        "end": _optional_float(item.get("to")),
+                        "end": optional_float(item.get("to")),
                         "text": content,
                     }
                 )
@@ -145,16 +162,16 @@ async def _fetch_subtitles(
     return results
 
 
-def _optional_float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    return float(value)
-
-
-def extract(url: str, sessdata: str = "", bili_jct: str = "", buvid3: str = "") -> VideoInfo:
+def extract(
+    url: str,
+    sessdata: str = "",
+    bili_jct: str = "",
+    buvid3: str = "",
+    progress: ProgressCallback | None = None,
+) -> VideoInfo:
     """Main entry: extract video info and subtitles."""
     bvid = parse_bvid(url)
     credential = None
     if sessdata:
         credential = Credential(sessdata=sessdata, bili_jct=bili_jct, buvid3=buvid3)
-    return asyncio.run(_fetch(bvid, credential))
+    return asyncio.run(_fetch(bvid, credential, progress))
