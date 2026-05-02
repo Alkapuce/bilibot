@@ -6,12 +6,18 @@ requires-python = ">=3.12"
 dependencies = [
     "bilibili-api-python>=17.4.1",
     "faster-whisper>=1.2.1",
+    "gguf>=0.18.0",
     "httpx>=0.28.1",
     "openai>=2.32.0",
     "python-dotenv>=1.2.2",
     "rich>=15.0.0",
+    "srt>=3.5.3",
     "yt-dlp>=2026.3.17",
 ]
+
+[project.optional-dependencies]
+qwen3 = ["qwen-asr", "torch>=2.0"]
+gguf = ["numpy", "soundfile", "scipy", "gguf", "onnxruntime", "srt"]
 
 [project.scripts]
 bilibot = "bilibot.cli:main"

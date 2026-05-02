@@ -20,7 +20,7 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from .asr import ASR_PRESETS, detect_runtime, resolve_asr_plan
+from .asr import ASR_PRESETS, WHISPER_MODEL_IDS, detect_runtime, resolve_asr_plan, resolve_backend
 from .config import Settings, load_settings
 from .extractor import extract
 from .models import format_timestamp
@@ -105,8 +105,10 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     download.add_argument("--yt-dlp-audio-quality", help="yt-dlp audio quality, default: 5")
 
     asr = parser.add_argument_group("asr")
+    asr.add_argument("--asr-backend", choices=("auto", "whisper", "qwen3", "gguf"), help="ASR backend: auto (detect), whisper, qwen3, gguf")
+    asr.add_argument("--asr-gguf-model-dir", help="GGUF model directory (ONNX + GGUF files)")
     asr.add_argument("--asr-preset", choices=ASR_PRESETS, help="ASR preset, default: auto")
-    asr.add_argument("--asr-model", help="faster-whisper model or local/Hugging Face path")
+    asr.add_argument("--asr-model", help="ASR model name, HuggingFace path, or local dir")
     asr.add_argument("--whisper-model", dest="asr_model", help="Alias for --asr-model")
     asr.add_argument("--asr-device", help="ASR device: cpu, cuda, or auto")
     asr.add_argument("--whisper-device", dest="asr_device", help="Alias for --asr-device")
@@ -262,6 +264,7 @@ def run_doctor(args: argparse.Namespace) -> int:
     preset_table.add_column("Batch")
     preset_table.add_column("VAD")
     preset_table.add_column("Reason")
+    gpu_mb = max((g.memory_mb for g in runtime.gpus), default=0)
     for preset in ASR_PRESETS:
         preset_settings = replace(
             settings,
@@ -273,6 +276,10 @@ def run_doctor(args: argparse.Namespace) -> int:
             asr_vad_filter=None,
         )
         plan = resolve_asr_plan(preset_settings, runtime)
+        reason = plan.reason
+        if preset == "auto":
+            backend = resolve_backend(settings, gpu_mb)
+            reason += f" || 运行时 auto 后端 = {backend}"
         preset_table.add_row(
             preset,
             plan.model,
@@ -280,11 +287,36 @@ def run_doctor(args: argparse.Namespace) -> int:
             plan.compute_type,
             str(plan.batch_size),
             "on" if plan.vad_filter else "off",
-            plan.reason,
+            reason,
         )
 
     console.print(runtime_table)
     console.print(preset_table)
+
+    backend = resolve_backend(settings, gpu_mb)
+    console.print(
+        Panel(
+            f"显存 {gpu_mb}MB → auto 后端 = [bold]{backend}[/bold]"
+            + (f" (低于 {QWEN3_1_7B_MIN_VRAM_MB}MB, 回退 whisper)" if backend == "whisper" and gpu_mb else ""),
+            title="Backend Selection",
+        )
+    )
+
+    model_table = Table(title="Available Models")
+    model_table.add_column("Backend", style="cyan", no_wrap=True)
+    model_table.add_column("Model ID")
+    model_table.add_column("Description")
+    for mid, hf_id in WHISPER_MODEL_IDS.items():
+        model_table.add_row("whisper", mid, hf_id)
+    from .qwen_asr_backend import QWEN3_MODEL_IDS as qwen_ids
+    for mid, hf_id in qwen_ids.items():
+        model_table.add_row("qwen3", mid, hf_id)
+    from .gguf_asr_backend import GGUF_MODEL_IDS as gguf_ids, _check_available as gguf_ok
+    for mid, desc in gguf_ids.items():
+        status = "OK" if gguf_ok(settings) else "需安装"
+        model_table.add_row("gguf", mid, f"{desc} [{status}]")
+    console.print(model_table)
+
     return 0
 
 
@@ -368,6 +400,7 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         yt_dlp_format=args.yt_dlp_format,
         yt_dlp_audio_format=args.yt_dlp_audio_format,
         yt_dlp_audio_quality=args.yt_dlp_audio_quality,
+        asr_backend=args.asr_backend,
         asr_preset=args.asr_preset,
         asr_model=args.asr_model,
         asr_device=args.asr_device,
@@ -432,4 +465,11 @@ def _normalize_argv(argv: list[str]) -> list[str]:
 
 
 def _video_input(value: list[str]) -> str:
-    return " ".join(value).strip().strip("'\"“”‘’`<>")
+    import re
+
+    raw = " ".join(value).strip().strip("'\"“”‘’`<>")
+    raw = re.sub(r"[?&]spm_id_from=[^&\s]+", "", raw)
+    raw = re.sub(r"[?&]vd_source=[^&\s]+", "", raw)
+    raw = re.sub(r"&$", "", raw)
+    raw = re.sub(r"\?$", "", raw)
+    return raw

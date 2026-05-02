@@ -1,4 +1,4 @@
-"""ASR runtime detection and faster-whisper preset resolution."""
+"""ASR runtime detection and preset resolution."""
 
 from __future__ import annotations
 
@@ -11,7 +11,40 @@ from dataclasses import dataclass
 from .config import Settings
 
 
-ASR_PRESETS = ("auto", "fast", "balanced", "accurate", "turbo")
+ASR_PRESETS = ("auto", "fast", "balanced", "accurate", "turbo", "best")
+
+WHISPER_MODEL_IDS: dict[str, str] = {
+    "tiny": "Systran/faster-whisper-tiny",
+    "base": "Systran/faster-whisper-base",
+    "small": "Systran/faster-whisper-small",
+    "medium": "Systran/faster-whisper-medium",
+    "large-v1": "Systran/faster-whisper-large-v1",
+    "large-v2": "Systran/faster-whisper-large-v2",
+    "large-v3": "Systran/faster-whisper-large-v3",
+    "turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+    "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
+}
+
+QWEN3_1_7B_MIN_VRAM_MB = 6000
+QWEN3_0_6B_MIN_VRAM_MB = 4000
+
+
+def resolve_backend(settings: Settings, gpu_mb: int = 0) -> str:
+    if settings.asr_backend not in ("auto", ""):
+        return settings.asr_backend
+    if _gguf_available(settings):
+        return "gguf"
+    if gpu_mb >= QWEN3_1_7B_MIN_VRAM_MB:
+        return "qwen3"
+    return "whisper"
+
+
+def _gguf_available(settings: Settings) -> bool:
+    try:
+        from .gguf_asr_backend import _check_available
+        return _check_available(settings)
+    except Exception:
+        return False
 
 
 @dataclass(frozen=True)
@@ -108,12 +141,51 @@ def _preset_plan(
     gpu_mb: int,
     has_usable_cuda: bool,
 ) -> tuple[str, str, str, int, bool, str]:
+    if preset == "best":
+        if gpu_mb >= 11000:
+            return (
+                "large-v3",
+                "cuda",
+                "float16",
+                16,
+                True,
+                "best 预设：11GB+ GPU，large-v3 float16 batch=16 极致质量。",
+            )
+        if gpu_mb >= 8192:
+            return (
+                "large-v3",
+                "cuda",
+                "float16",
+                8,
+                True,
+                "best 预设：8GB+ GPU，large-v3 float16 高质量模式。",
+            )
+        if gpu_mb >= 4096:
+            return (
+                "turbo",
+                "cuda",
+                "float16",
+                4,
+                True,
+                "best 预设：4GB+ GPU，turbo float16 高质量模式。",
+            )
+        return ("medium", "cpu", "int8", 0, True, "best 预设：无 4GB+ GPU，使用 CPU medium。")
+
     if preset == "fast":
         if has_usable_cuda:
             return ("small", "cuda", "int8_float16", 4, True, "fast 预设：CUDA 可用，优先速度。")
         return ("base", "cpu", "int8", 0, True, "fast 预设：CPU int8，优先速度。")
 
     if preset == "accurate":
+        if gpu_mb >= 11000:
+            return (
+                "large-v3",
+                "cuda",
+                "float16",
+                12,
+                True,
+                "accurate 预设：11GB+ GPU，large-v3 float16 batch=12。",
+            )
         if gpu_mb >= 8192:
             return ("large-v3", "cuda", "float16", 8, True, "accurate 预设：8GB+ GPU，使用 large-v3。")
         if gpu_mb >= 4096:
@@ -126,12 +198,37 @@ def _preset_plan(
         return ("turbo", "cpu", "int8", 0, True, "turbo 预设：无 4GB+ GPU，改用 CPU int8。")
 
     if preset == "balanced":
+        if gpu_mb >= 11000:
+            return (
+                "distil-large-v3",
+                "cuda",
+                "float16",
+                16,
+                True,
+                "balanced 预设：11GB+ GPU，distil-large-v3 float16 batch=16。",
+            )
         if gpu_mb >= 8192:
-            return ("distil-large-v3", "cuda", "float16", 8, True, "balanced 预设：8GB+ GPU，使用 distil-large-v3。")
+            return (
+                "distil-large-v3",
+                "cuda",
+                "float16",
+                8,
+                True,
+                "balanced 预设：8GB+ GPU，使用 distil-large-v3。",
+            )
         if has_usable_cuda:
             return ("small", "cuda", "int8_float16", 4, True, "balanced 预设：4GB+ GPU，使用 small。")
         return ("small", "cpu", "int8", 0, True, "balanced 预设：CPU small，兼顾速度和准确率。")
 
+    if gpu_mb >= 11000:
+        return (
+            "large-v3",
+            "cuda",
+            "float16",
+            12,
+            True,
+            "auto：检测到 11GB+ GPU，使用 large-v3 float16 batch=12。",
+        )
     if gpu_mb >= 8192:
         return ("large-v3", "cuda", "float16", 8, True, "auto：检测到 8GB+ GPU，使用 large-v3。")
     if gpu_mb >= 4096:

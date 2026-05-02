@@ -1,0 +1,258 @@
+"""Qwen3-ASR GGUF backend — ONNX + llama.cpp pipeline.
+
+Priority:
+1. qwen_asr_gguf Python 模块 (若在 sys.path 中)
+2. 独立的 _gguf_core 模块 (需手动配置 llama.cpp DLL)
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import sys
+from pathlib import Path
+
+from .config import Settings
+from .models import Transcript, TranscriptSegment
+from .progress import ProgressCallback, emit
+
+logger = logging.getLogger("bilibot.gguf_asr")
+
+GGUF_MODEL_IDS: dict[str, str] = {
+    "qwen3-asr-1.7b": "Qwen3-ASR-1.7B",
+}
+
+_HF_GGUF_ALIASES: dict[str, str] = {
+    "qwen3-asr-1.7b": "HaujetZhao/Qwen3-ASR-1.7B-GGUF",
+}
+
+
+def _check_available(settings: Settings) -> bool:
+    try:
+        _resolve_llama_bin(settings)
+        return True
+    except Exception:
+        return False
+
+
+def _model_dir(settings: Settings) -> Path:
+    model = settings.asr_model
+
+    if model:
+        p = Path(model)
+        if p.is_dir():
+            return p.resolve()
+
+    env_dir = os.getenv("ASR_GGUF_MODEL_DIR", "")
+    if env_dir and Path(env_dir).is_dir():
+        return Path(env_dir)
+
+    default = Path("models") / "Qwen3-ASR-1.7B-GGUF"
+    if default.is_dir():
+        return default.resolve()
+
+    raise FileNotFoundError(
+        "未找到 GGUF 模型目录。请设置 ASR_GGUF_MODEL_DIR 环境变量，\n"
+        "或将模型放到 models/Qwen3-ASR-1.7B-GGUF/ 目录。"
+    )
+
+
+def _find_files(model_dir: Path) -> dict[str, str]:
+    candidates = {
+        "encoder_frontend": [
+            "qwen3_asr_encoder_frontend.fp16.onnx",
+            "qwen3_asr_encoder_frontend.int4.onnx",
+        ],
+        "encoder_backend": [
+            "qwen3_asr_encoder_backend.fp16.onnx",
+            "qwen3_asr_encoder_backend.int4.onnx",
+        ],
+        "llm": [
+            "qwen3_asr_llm.q4_k.gguf",
+            "qwen3_asr_llm.q8_0.gguf",
+        ],
+    }
+    result: dict[str, str] = {}
+    for key, filenames in candidates.items():
+        for fn in filenames:
+            p = model_dir / fn
+            if p.is_file():
+                result[key] = str(p)
+                break
+        if key not in result:
+            raise FileNotFoundError(
+                f"在 {model_dir} 中未找到 {key} 文件，期望: {filenames}"
+            )
+    return result
+
+
+def _resolve_llama_bin(settings: Settings) -> str:
+    env_bin = os.getenv("ASR_GGUF_LLAMA_BIN", "")
+    if env_bin and Path(env_bin).is_dir():
+        return env_bin
+
+    for p in os.environ.get("PATH", "").split(os.pathsep):
+        if (Path(p) / "llama.dll").exists() or (Path(p) / "libllama.so").exists():
+            return p
+
+    bundled = Path(__file__).parent / "_gguf_core" / "bin"
+    if bundled.is_dir():
+        if any(bundled.glob("llama.*") or bundled.glob("libllama.*")):
+            return str(bundled)
+
+    raise FileNotFoundError(
+        "未找到 llama.cpp 动态库。请设置 ASR_GGUF_LLAMA_BIN 环境变量，\n"
+        "或从 https://github.com/ggml-org/llama.cpp/releases 下载预编译包放入 _gguf_core/bin/"
+    )
+
+
+def transcribe(
+    audio_path: str,
+    settings: Settings,
+    *,
+    progress: ProgressCallback | None = None,
+) -> Transcript:
+    model_dir = _model_dir(settings)
+    files = _find_files(model_dir)
+
+    emit(progress, "task_start", "asr_model_load", f"加载 Qwen3-ASR GGUF 模型: {model_dir}")
+
+    engine = _create_engine_qwen_asr_gguf(model_dir, files, settings)
+    engine_ok = False
+    if engine:
+        engine_ok = True
+    if not engine:
+        engine = _create_engine_standalone(model_dir, files, settings)
+
+    emit(progress, "task_done", "asr_model_load", f"Qwen3-ASR GGUF 已加载 ({'caps' if engine_ok else 'standalone'})")
+
+    language = _map_lang(settings.language)
+
+    emit(progress, "task_start", "asr_transcribe", "Qwen3-ASR GGUF 识别中")
+    result = engine.transcribe(audio_file=audio_path, language=language, temperature=0.4)
+    text = result.text.strip()
+    emit(progress, "task_done", "asr_transcribe", f"Qwen3-ASR GGUF 完成: {len(text)} 字符")
+
+    return Transcript(
+        source=f"gguf/{model_dir}",
+        language=language or "zh",
+        segments=[TranscriptSegment(start=0.0, end=0.0, text=text)],
+    )
+
+
+def transcribe_url(
+    url: str,
+    settings: Settings,
+    *,
+    progress: ProgressCallback | None = None,
+) -> Transcript:
+    import tempfile
+
+    from .transcriber import download_audio
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        emit(progress, "log", "download_audio", "准备下载音频")
+        audio_path = download_audio(
+            url, tmpdir, settings.cookie_file,
+            sessdata=settings.bili_sessdata, bili_jct=settings.bili_jct,
+            buvid3=settings.bili_buvid3, timeout=settings.download_timeout,
+            chunk_size=settings.download_chunk_size,
+            yt_dlp_format=settings.yt_dlp_format,
+            yt_dlp_audio_format=settings.yt_dlp_audio_format,
+            yt_dlp_audio_quality=settings.yt_dlp_audio_quality,
+            progress=progress,
+        )
+        return transcribe(audio_path, settings, progress=progress)
+
+
+def _create_engine_qwen_asr_gguf(
+    model_dir: Path,
+    files: dict[str, str],
+    settings: Settings,
+) -> object | None:
+    mod_root = _find_qwen_asr_gguf_module()
+    if not mod_root:
+        return None
+    try:
+        util_path = str(mod_root / "util")
+        if util_path not in sys.path:
+            sys.path.insert(0, util_path)
+
+        onnx_path = str(mod_root / "internal" / "onnxruntime" / "capi")
+        if onnx_path not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = onnx_path + os.pathsep + os.environ.get("PATH", "")
+        os.add_dll_directory(onnx_path)
+
+        from qwen_asr_gguf import create_asr_engine, ASREngineConfig
+        config = ASREngineConfig(
+            model_dir=str(model_dir),
+            encoder_frontend_fn=Path(files["encoder_frontend"]).name,
+            encoder_backend_fn=Path(files["encoder_backend"]).name,
+            llm_fn=Path(files["llm"]).name,
+            vulkan_enable=True, chunk_size=40.0, n_ctx=2048, verbose=False,
+        )
+        wrapper = create_asr_engine(
+            model_dir=str(model_dir),
+            encoder_frontend_fn=Path(files["encoder_frontend"]).name,
+            encoder_backend_fn=Path(files["encoder_backend"]).name,
+            llm_fn=Path(files["llm"]).name,
+            vulkan_enable=True, chunk_size=40.0, n_ctx=2048, verbose=False,
+        )
+        return wrapper.engine
+    except Exception as exc:
+        logger.debug("qwen_asr_gguf engine init failed: %s", exc)
+        return None
+
+
+def _create_engine_standalone(
+    model_dir: Path,
+    files: dict[str, str],
+    settings: Settings,
+):
+    try:
+        import numpy  # noqa: F401
+        import onnxruntime  # noqa: F401
+        import gguf  # noqa: F401
+    except ImportError as e:
+        raise RuntimeError(
+            f"GGUF 后端缺少依赖 ({e})。请运行:\n  uv sync --extra gguf"
+        )
+
+    from ._gguf_core import QwenASREngine, ASREngineConfig, set_lib_dir, init_llama_lib
+
+    set_lib_dir(_resolve_llama_bin(settings))
+    init_llama_lib()
+
+    config = ASREngineConfig(
+        model_dir=str(model_dir),
+        encoder_frontend_fn=Path(files["encoder_frontend"]).name,
+        encoder_backend_fn=Path(files["encoder_backend"]).name,
+        llm_fn=Path(files["llm"]).name,
+        vulkan_enable=True, chunk_size=40.0, n_ctx=2048, verbose=False,
+    )
+    return QwenASREngine(config)
+
+
+def _find_qwen_asr_gguf_module() -> Path | None:
+    candidates = [
+        Path("C:/Program Files (x)/CapsWriter-Offline"),
+        Path("C:/Program Files/CapsWriter-Offline"),
+        Path.home() / "CapsWriter-Offline",
+    ]
+    for p in candidates:
+        util = p / "util" / "qwen_asr_gguf"
+        if util.is_dir():
+            return p
+    return None
+
+
+def _map_lang(language: str | None) -> str | None:
+    if not language:
+        return None
+    lang_map = {
+        "zh": "Chinese", "en": "English", "ja": "Japanese",
+        "ko": "Korean", "auto": None, "": None,
+    }
+    if language in lang_map:
+        return lang_map[language]
+    return language.capitalize()

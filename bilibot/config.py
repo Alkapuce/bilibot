@@ -23,6 +23,7 @@ class Settings:
     output_dir: Path = Path("data")
     language: str = "zh"
 
+    asr_backend: str = "auto"
     asr_preset: str = "auto"
     asr_model: str = ""
     asr_device: str = ""
@@ -72,6 +73,7 @@ def load_settings(**overrides: Any) -> Settings:
         chunk_chars=_env_int("CHUNK_CHARS", Settings.chunk_chars),
         output_dir=Path(os.getenv("BILIBOT_OUTPUT_DIR", str(Settings.output_dir))),
         language=os.getenv("TRANSCRIPT_LANGUAGE", Settings.language),
+        asr_backend=os.getenv("ASR_BACKEND", Settings.asr_backend),
         asr_preset=os.getenv("ASR_PRESET", Settings.asr_preset),
         asr_model=os.getenv("ASR_MODEL", os.getenv("WHISPER_MODEL", Settings.asr_model)),
         asr_device=os.getenv("ASR_DEVICE", os.getenv("WHISPER_DEVICE", Settings.asr_device)),

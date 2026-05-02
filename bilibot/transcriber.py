@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 from bilibili_api import Credential, video
 
-from .asr import AsrPlan, resolve_asr_plan
+from .asr import AsrPlan, detect_runtime, resolve_asr_plan, resolve_backend
 from .config import Settings
 from .extractor import parse_bvid
 from .models import Transcript, TranscriptSegment
@@ -314,7 +314,22 @@ def transcribe_url(
     progress: ProgressCallback | None = None,
 ) -> Transcript:
     """Download audio and return structured transcript."""
-    plan = resolve_asr_plan(settings)
+    runtime = detect_runtime()
+    best_gpu = max(runtime.gpus, key=lambda g: g.memory_mb, default=None)
+    gpu_mb = best_gpu.memory_mb if best_gpu else 0
+    backend = resolve_backend(settings, gpu_mb)
+
+    if backend == "gguf":
+        from .gguf_asr_backend import transcribe_url as gguf_transcribe_url
+
+        return gguf_transcribe_url(url, settings, progress=progress)
+
+    if backend == "qwen3":
+        from .qwen_asr_backend import transcribe_url as qwen_transcribe_url
+
+        return qwen_transcribe_url(url, settings, progress=progress)
+
+    plan = resolve_asr_plan(settings, runtime)
     with tempfile.TemporaryDirectory() as tmpdir:
         emit(progress, "log", "download_audio", "准备下载音频")
         audio_path = download_audio(
