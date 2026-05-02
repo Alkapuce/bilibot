@@ -49,7 +49,10 @@ class Transcript:
         return "\n".join(lines)
 
     def to_captions(self) -> str:
-        return "\n".join(s.text for s in self.segments if s.text.strip()) + "\n"
+        import re
+        full = "".join(s.text for s in self.segments if s.text.strip())
+        lines = [l.strip() for l in re.split(r"(?<=[。！？])", full) if l.strip()]
+        return "\n".join(lines) + "\n"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
