@@ -112,23 +112,27 @@ def transcribe(
     *,
     progress: ProgressCallback | None = None,
 ) -> Transcript:
+    import io, contextlib
+
     model_dir = _model_dir(settings)
     files = _find_files(model_dir)
 
     emit(progress, "task_start", "asr_model_load", f"加载 Qwen3-ASR GGUF 模型: {model_dir}")
 
-    engine = _create_engine_qwen_asr_gguf(model_dir, files, settings)
-    if not engine:
-        engine = _create_engine_standalone(model_dir, files, settings)
-    if not engine:
-        raise RuntimeError("无法初始化 GGUF 引擎")
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        engine = _create_engine_qwen_asr_gguf(model_dir, files, settings)
+        if not engine:
+            engine = _create_engine_standalone(model_dir, files, settings)
+        if not engine:
+            raise RuntimeError("无法初始化 GGUF 引擎")
 
     emit(progress, "task_done", "asr_model_load", f"Qwen3-ASR GGUF 已加载")
 
     language = _map_lang(settings.language)
 
-    emit(progress, "task_start", "asr_transcribe", "Qwen3-ASR GGUF 识别中")
-    result = engine.transcribe(audio_file=audio_path, language=language, temperature=0.4)
+    emit(progress, "task_start", "asr_transcribe", "Qwen3-ASR GGUF 识别中", total=None)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        result = engine.transcribe(audio_file=audio_path, language=language, temperature=0.4)
     segments = _build_segments(result, audio_path)
     text = _trim_repetition(result.text.strip())
     emit(progress, "task_done", "asr_transcribe", f"Qwen3-ASR GGUF 完成: {len(text)} 字符, {len(segments)} 段")
