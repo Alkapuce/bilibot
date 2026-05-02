@@ -28,16 +28,16 @@ def save_transcript_artifacts(
     paths: dict[str, Path] = {
         "metadata": root / "metadata.json",
         "transcript_json": root / "transcript.json",
-        "transcript_md": root / "transcript.md",
+        "captions_txt": root / "captions.txt",
     }
     _write_json(paths["metadata"], _metadata_payload(info))
     _write_json(paths["transcript_json"], transcript.to_dict())
-    paths["transcript_md"].write_text(transcript.to_markdown(), encoding="utf-8")
+    paths["captions_txt"].write_text(transcript.to_captions(), encoding="utf-8")
     if raw_transcript is not None:
         paths["transcript_raw_json"] = root / "transcript_raw.json"
-        paths["transcript_raw_md"] = root / "transcript_raw.md"
+        paths["captions_raw_txt"] = root / "captions_raw.txt"
         _write_json(paths["transcript_raw_json"], raw_transcript.to_dict())
-        paths["transcript_raw_md"].write_text(raw_transcript.to_markdown(), encoding="utf-8")
+        paths["captions_raw_txt"].write_text(raw_transcript.to_captions(), encoding="utf-8")
     return paths
 
 

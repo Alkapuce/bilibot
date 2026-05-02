@@ -138,7 +138,7 @@ def transcribe(
     emit(progress, "task_done", "asr_transcribe", f"Qwen3-ASR GGUF 完成: {len(text)} 字符, {len(segments)} 段")
 
     return Transcript(
-        source=f"gguf/{model_dir}",
+        source="qwen3-gguf",
         language=language or "zh",
         segments=segments or [TranscriptSegment(start=0.0, end=0.0, text=text)],
     )

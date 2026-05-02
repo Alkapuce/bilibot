@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, is_dataclass
-from typing import Any, Literal
+from typing import Any
 
 
-TranscriptSource = Literal["bilibili_subtitle", "whisper"]
+TranscriptSource = str
 
 
 @dataclass
@@ -47,6 +47,9 @@ class Transcript:
         lines.extend(segment.to_line() for segment in self.segments)
         lines.append("")
         return "\n".join(lines)
+
+    def to_captions(self) -> str:
+        return "\n".join(s.text for s in self.segments if s.text.strip()) + "\n"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
