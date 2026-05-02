@@ -252,8 +252,13 @@ def transcribe(
         }
     if settings.asr_hotwords:
         transcribe_kwargs["hotwords"] = settings.asr_hotwords
-    if settings.asr_initial_prompt:
-        transcribe_kwargs["initial_prompt"] = settings.asr_initial_prompt
+    initial_prompt = settings.asr_initial_prompt
+    if not initial_prompt and settings.language == "zh":
+        initial_prompt = (
+            "以下是中文普通话的句子，使用简体中文。"
+        )
+    if initial_prompt:
+        transcribe_kwargs["initial_prompt"] = initial_prompt
 
     runner: Any = model
     if plan.batch_size > 1:
