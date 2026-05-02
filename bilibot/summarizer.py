@@ -63,9 +63,16 @@ def summarize_video(
         return render_basic_notes(info, transcript, "未获取到可用于总结的字幕或转写文本。")
 
     chunks = split_text(transcript_text, settings.chunk_chars)
+    emit(
+        progress,
+        "log",
+        "llm_summarize",
+        f"字幕共 {len(transcript_text)} 字符，分为 {len(chunks)} 块，使用模型 {settings.llm_model}",
+    )
     if len(chunks) == 1:
         emit(progress, "task_start", "llm_summarize", f"生成笔记：{settings.llm_model}", total=1)
-        notes = _summarize_single(llm, info, transcript, chunks[0])
+        emit(progress, "log", "llm_summarize", f"第 1 块，{len(chunks[0])} 字符，正在调用 LLM...")
+        notes = _summarize_single(llm, info, transcript, chunks[0], progress=progress)
         emit(progress, "task_done", "llm_summarize", "笔记生成完成")
         return notes
 
@@ -79,11 +86,26 @@ def summarize_video(
         unit="chunk",
     )
     for index, chunk in enumerate(chunks, start=1):
-        emit(progress, "task_update", "llm_summarize", f"总结分块 {index}/{len(chunks)}")
-        partial_notes.append(_summarize_chunk(llm, info, transcript, chunk, index, len(chunks)))
-        emit(progress, "task_update", "llm_summarize", f"总结分块 {index}/{len(chunks)}", advance=1)
+        emit(
+            progress,
+            "task_update",
+            "llm_summarize",
+            f"总结分块 {index}/{len(chunks)} ({len(chunk)} 字符)",
+        )
+        emit(progress, "log", "llm_summarize", f"第 {index}/{len(chunks)} 块，{len(chunk)} 字符，正在调用 LLM...")
+        partial_notes.append(
+            _summarize_chunk(llm, info, transcript, chunk, index, len(chunks), progress=progress)
+        )
+        emit(
+            progress,
+            "task_update",
+            "llm_summarize",
+            f"总结分块 {index}/{len(chunks)} 完成",
+            advance=1,
+        )
     emit(progress, "task_update", "llm_summarize", "合并分块笔记")
-    notes = _merge_notes(llm, info, transcript, partial_notes)
+    emit(progress, "log", "llm_summarize", "正在合并分块笔记...")
+    notes = _merge_notes(llm, info, transcript, partial_notes, progress=progress)
     emit(progress, "task_done", "llm_summarize", "笔记生成完成")
     return notes
 
@@ -123,7 +145,14 @@ def _video_context(info: VideoInfo, transcript: Transcript) -> str:
     )
 
 
-def _summarize_single(llm: LLMClient, info: VideoInfo, transcript: Transcript, text: str) -> str:
+def _summarize_single(
+    llm: LLMClient,
+    info: VideoInfo,
+    transcript: Transcript,
+    text: str,
+    *,
+    progress: ProgressCallback | None = None,
+) -> str:
     prompt = f"""请根据下面的视频信息和完整字幕生成一份完整中文 Markdown 笔记。
 
 输出结构：
@@ -143,11 +172,12 @@ def _summarize_single(llm: LLMClient, info: VideoInfo, transcript: Transcript, t
 完整字幕：
 {text}
 """
-    return llm.complete(
+    return llm.complete_stream(
         [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
-        ]
+        ],
+        progress=progress,
     )
 
 
@@ -158,6 +188,8 @@ def _summarize_chunk(
     text: str,
     index: int,
     total: int,
+    *,
+    progress: ProgressCallback | None = None,
 ) -> str:
     prompt = f"""这是同一个视频字幕的第 {index}/{total} 段。请先生成分段笔记，供后续合并。
 
@@ -172,11 +204,12 @@ def _summarize_chunk(
 字幕片段：
 {text}
 """
-    return llm.complete(
+    return llm.complete_stream(
         [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
-        ]
+        ],
+        progress=progress,
     )
 
 
@@ -185,6 +218,8 @@ def _merge_notes(
     info: VideoInfo,
     transcript: Transcript,
     partial_notes: list[str],
+    *,
+    progress: ProgressCallback | None = None,
 ) -> str:
     joined = "\n\n---\n\n".join(
         f"分段笔记 {index}：\n{note}" for index, note in enumerate(partial_notes, start=1)
@@ -194,7 +229,7 @@ def _merge_notes(
 要求：
 - 去重并重组为连贯结构，不要简单拼接。
 - 保留关键时间点。
-- 如果分段笔记之间存在矛盾，放到“仍需核实”。
+- 如果分段笔记之间存在矛盾，放到"仍需核实"。
 
 输出结构：
 # {info.title or info.bvid}
@@ -213,9 +248,10 @@ def _merge_notes(
 分段笔记：
 {joined}
 """
-    return llm.complete(
+    return llm.complete_stream(
         [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
-        ]
+        ],
+        progress=progress,
     )

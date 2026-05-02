@@ -76,6 +76,7 @@ def _postprocess_transcript_impl(
             transcript,
             chunk,
             settings.subtitle_postprocess_style,
+            progress=progress,
         )
         for item_index, text_value in replacements.items():
             if 0 <= item_index < len(new_segments):
@@ -109,6 +110,8 @@ def _postprocess_chunk(
     transcript: Transcript,
     chunk: list[tuple[int, TranscriptSegment]],
     style: str,
+    *,
+    progress: ProgressCallback | None = None,
 ) -> dict[int, str]:
     payload = [
         {
@@ -136,11 +139,13 @@ def _postprocess_chunk(
 {json.dumps(payload, ensure_ascii=False)}
 """
     try:
-        response = llm.complete(
+        response = llm.complete_stream(
             [
                 {"role": "system", "content": "你是字幕校对助手，只输出合法 JSON。"},
                 {"role": "user", "content": prompt},
-            ]
+            ],
+            task_name="subtitle_postprocess",
+            progress=progress,
         )
     except Exception:
         return {}

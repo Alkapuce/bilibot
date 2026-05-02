@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from openai import OpenAI
 
 from .config import Settings
+from .progress import ProgressCallback, emit
 
 
 Message = dict[str, str]
@@ -35,11 +37,62 @@ class LLMClient:
         )
 
     def complete(self, messages: Sequence[Message]) -> str:
-        kwargs = {}
+        return self._complete_impl(messages)
+
+    def complete_stream(
+        self,
+        messages: Sequence[Message],
+        *,
+        task_name: str = "llm_generating",
+        progress: ProgressCallback | None = None,
+    ) -> str:
+        return self._complete_impl(messages, task_name=task_name, progress=progress)
+
+    def _complete_impl(
+        self,
+        messages: Sequence[Message],
+        *,
+        task_name: str = "llm_generating",
+        progress: ProgressCallback | None = None,
+    ) -> str:
+        kwargs: dict[str, Any] = {}
         if self.temperature is not None:
             kwargs["temperature"] = self.temperature
         if self.max_tokens is not None:
             kwargs["max_tokens"] = self.max_tokens
+
+        if progress is not None:
+            kwargs["stream"] = True
+            tokens = 0
+            chunks: list[str] = []
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=list(messages),
+                **kwargs,
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    chunks.append(delta.content)
+                    tokens += 1
+                    if tokens % 30 == 0:
+                        emit(
+                            progress,
+                            "task_update",
+                            task_name,
+                            f"LLM 生成中 ({tokens} tokens)",
+                            advance=30,
+                        )
+            if tokens % 30 != 0:
+                emit(
+                    progress,
+                    "task_update",
+                    task_name,
+                    f"LLM 生成完成 ({tokens} tokens)",
+                    advance=tokens % 30,
+                )
+            content = "".join(chunks).strip()
+            return content
 
         response = self.client.chat.completions.create(
             model=self.model,
