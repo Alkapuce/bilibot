@@ -173,6 +173,7 @@ def _create_engine_qwen_asr_gguf(
     mod_root = _find_qwen_asr_gguf_module()
     if not mod_root:
         return None
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
     try:
         util_path = str(mod_root / "util")
         if util_path not in sys.path:
