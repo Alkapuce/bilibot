@@ -129,14 +129,14 @@ def transcribe(
 
     emit(progress, "task_start", "asr_transcribe", "Qwen3-ASR GGUF 识别中")
     result = engine.transcribe(audio_file=audio_path, language=language, temperature=0.4)
+    segments = _build_segments(result, audio_path)
     text = _trim_repetition(result.text.strip())
-    emit(progress, "task_done", "asr_transcribe", f"Qwen3-ASR GGUF 完成: {len(text)} 字符")
-    emit(progress, "task_done", "asr_transcribe", f"Qwen3-ASR GGUF 完成: {len(text)} 字符")
+    emit(progress, "task_done", "asr_transcribe", f"Qwen3-ASR GGUF 完成: {len(text)} 字符, {len(segments)} 段")
 
     return Transcript(
         source=f"gguf/{model_dir}",
         language=language or "zh",
-        segments=[TranscriptSegment(start=0.0, end=0.0, text=text)],
+        segments=segments or [TranscriptSegment(start=0.0, end=0.0, text=text)],
     )
 
 
@@ -285,3 +285,50 @@ def _trim_repetition(text: str) -> str:
                 text += chunks[k]
             return text
     return text
+
+
+def _build_segments(result, audio_path: str) -> list:
+    segs = []
+    if hasattr(result, "segments") and result.segments:
+        for s in result.segments:
+            if isinstance(s, dict):
+                text = s.get("text", "").strip()
+                if text:
+                    segs.append(TranscriptSegment(start=s.get("start", 0), end=s.get("end", 0), text=text))
+    if not segs:
+        duration = _audio_duration(audio_path)
+        full_text = result.text.strip()
+        if duration > 0 and full_text:
+            chars_per_sec = max(len(full_text) / duration, 1)
+            chunk = 0.0
+            chunk_size = 30.0
+            remaining = full_text
+            while remaining and chunk < duration:
+                end = min(chunk + chunk_size, duration)
+                chars = int((end - chunk) * chars_per_sec)
+                seg_text = remaining[:chars]
+                remaining = remaining[chars:]
+                if seg_text.strip():
+                    segs.append(TranscriptSegment(start=round(chunk, 1), end=round(end, 1), text=seg_text.strip()))
+                chunk = end
+            if remaining.strip():
+                segs.append(TranscriptSegment(start=round(duration, 1), end=round(duration + 1, 1), text=remaining.strip()))
+    return segs
+
+
+def _audio_duration(audio_path: str) -> float:
+    try:
+        import soundfile as sf
+        return sf.info(audio_path).duration
+    except Exception:
+        pass
+    try:
+        import subprocess
+        r = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        return float(r.stdout.strip())
+    except Exception:
+        return 0.0

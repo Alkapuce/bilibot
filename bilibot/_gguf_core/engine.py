@@ -318,8 +318,11 @@ class QwenASREngine:
         # 3. 结果整理
         t_total = time.time() - t_main_start
         if self.verbose: self._print_stats(stats, total_duration, t_total)
-            
+
+        segs = [{"start": s.audio_start, "end": s.audio_end, "text": s.text} for s in all_segments if s.text.strip()]
+
         return TranscribeResult(
             text=total_full_text,
+            segments=segs,
             performance=stats
         )

@@ -67,4 +67,5 @@ class ASREngineConfig:
 class TranscribeResult:
     """ASR 转录结果"""
     text: str
+    segments: list = field(default_factory=list)
     performance: Optional[dict] = None
