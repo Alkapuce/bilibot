@@ -102,7 +102,9 @@ def _metadata_payload(info: VideoInfo) -> dict[str, Any]:
 
 
 def _write_json(path: Path, payload: Any) -> None:
-    path.write_text(
-        json.dumps(jsonable(payload), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    try:
+        serialized = json.dumps(jsonable(payload), ensure_ascii=False, indent=2, default=str)
+    except (TypeError, ValueError) as exc:
+        print(f"[bilibot] JSON 序列化失败 ({path.name}): {exc}，使用 repr 回退")
+        serialized = json.dumps({"error": str(exc), "data": repr(payload)}, ensure_ascii=False, indent=2)
+    path.write_text(serialized, encoding="utf-8")

@@ -124,19 +124,27 @@ def render_basic_notes(info: VideoInfo, transcript: Transcript, reason: str = ""
         "",
         "## 说明",
         "",
-        reason or "未调用 LLM，总结已跳过。",
-        "",
     ]
+    if reason:
+        lines.append(reason)
+    elif not transcript.text.strip():
+        lines.append("未获取到可用于总结的字幕或转写文本。")
+    else:
+        lines.append("未调用 LLM，总结已跳过。")
+    lines.append("")
     return "\n".join(lines)
 
 
-def _video_context(info: VideoInfo, transcript: Transcript) -> str:
+def _video_context(info: VideoInfo, transcript: Transcript, *, desc_max_chars: int = 500) -> str:
+    desc = info.desc
+    if len(desc) > desc_max_chars:
+        desc = desc[:desc_max_chars] + "…"
     return "\n".join(
         [
             f"标题：{info.title}",
             f"BV号：{info.bvid}",
             f"作者：{info.author}",
-            f"简介：{info.desc}",
+            f"简介：{desc}",
             f"时长：{format_timestamp(float(info.duration))}",
             f"链接：{info.url}",
             f"字幕来源：{transcript.source}",

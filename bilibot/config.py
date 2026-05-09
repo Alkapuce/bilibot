@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 @dataclass(frozen=True)
 class Settings:
     llm_base_url: str = "http://localhost:5001/v1"
-    llm_api_key: str = "replace-with-your-key"
+    llm_api_key: str = ""
     llm_model: str = "deepseek-v4-pro"
     llm_timeout: float = 180.0
     llm_temperature: float | None = None

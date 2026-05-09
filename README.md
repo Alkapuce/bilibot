@@ -1,12 +1,143 @@
-# bilibot
+# bilibot · B站视频笔记助手
 
-B 站视频笔记助手：获取 Bilibili 视频元数据与字幕，调用大模型生成结构化 Markdown 笔记。  
-支持三种本地语音识别后端：Qwen3-ASR GGUF、Qwen3-ASR BF16（HuggingFace）、Whisper（faster-whisper）。
+[English](#english) | [中文](#chinese)
 
-## 快速开始
+---
+
+<a id="english"></a>
+## English
+
+**bilibot** is a CLI tool that extracts Bilibili video metadata and subtitles, then calls an LLM to generate structured Markdown study notes.
+
+Three local ASR backends are supported: **Qwen3-ASR GGUF**, **Qwen3-ASR (HuggingFace)**, and **Whisper (faster-whisper)**. The `auto` mode selects the best available one.
+
+### Quick Start
 
 ```bash
-# 克隆 & 安装
+git clone https://github.com/anomalyco/bilibot
+cd bilibot
+uv sync
+
+# Check your environment
+uv run bilibot doctor
+
+# Analyze a video (auto selects best ASR backend)
+uv run bilibot summarize https://www.bilibili.com/video/BVxxxx/
+```
+
+You can also pass just the BV ID:
+
+```bash
+uv run bilibot BVxxxx
+uv run bilibot 1xxxxxxxxx
+```
+
+> Wrap URLs with `?` or `&` in quotes to prevent shell interpretation.
+
+### Setup
+
+Copy `.env.example` to `.env` and fill in your LLM endpoint:
+
+```env
+LLM_BASE_URL=http://localhost:5001/v1
+LLM_API_KEY=your-key-here
+LLM_MODEL=deepseek-v4-pro
+```
+
+At minimum, only `LLM_BASE_URL` and `LLM_API_KEY` are required. All other settings have sensible defaults.
+
+### ASR Backends
+
+| Priority | Backend | Requirement | Size |
+|----------|---------|-------------|------|
+| 1 | **gguf** (ONNX + llama.cpp) | ONNX Runtime + llama.cpp lib | ~1.8 GB |
+| 2 | **qwen3** (HuggingFace BF16) | ≥6 GB VRAM | ~3.4 GB |
+| 3 | **whisper** (faster-whisper) | Always available | 0.15–3 GB |
+
+#### GGUF (recommended)
+
+```bash
+uv sync --extra gguf
+export ASR_GGUF_MODEL_DIR=/path/to/Qwen3-ASR-1.7B-GGUF
+export ASR_GGUF_LLAMA_BIN=/path/to/llama.cpp/bin
+uv run bilibot summarize BVxxxx
+```
+
+Download the GGUF model from [HuggingFace](https://huggingface.co/HaujetZhao/Qwen3-ASR-1.7B-GGUF) and llama.cpp binaries from [Releases](https://github.com/ggml-org/llama.cpp/releases).
+
+#### Qwen3 BF16
+
+```bash
+uv sync --extra qwen3
+uv run bilibot summarize BVxxxx --asr-backend qwen3
+```
+
+#### Whisper
+
+```bash
+uv run bilibot summarize BVxxxx --asr-backend whisper --asr-preset accurate
+```
+
+### Commands
+
+```bash
+uv run bilibot summarize <url>                  # Full pipeline
+uv run bilibot summarize <url> --no-llm         # Extract transcript only
+uv run bilibot summarize <url> --force-asr      # Skip Bilibili subtitles
+uv run bilibot summarize <url> --json           # JSON output (for scripts/agents)
+uv run bilibot summarize <url> --quiet          # Only print file paths
+uv run bilibot info <url>                       # Metadata only
+uv run bilibot info <url> --json                # Metadata as JSON
+uv run bilibot download <url>                   # Download video
+uv run bilibot download <url> --json            # Output file path as JSON
+uv run bilibot gen-notes <bvid>                 # Regenerate notes from cache
+uv run bilibot doctor                           # System check
+uv run bilibot doctor --json                    # System check as JSON
+```
+
+### Output
+
+All files go to `data/{bvid}/`:
+
+| File | Description |
+|------|-------------|
+| `{title}_信息.json` | Video metadata |
+| `{title}_字幕.json` | Structured transcript |
+| `{title}_字幕.txt` | Plain-text transcript |
+| `{title}_笔记.md` | LLM-generated notes |
+
+### Requirements
+
+- Python ≥ 3.12
+- [uv](https://github.com/astral-sh/uv)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) (auto-installed; system package recommended)
+
+### Tech Stack
+
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — Whisper ASR
+- [Qwen3-ASR GGUF](https://github.com/HaujetZhao/Qwen3-ASR-GGUF) — ONNX + llama.cpp ASR
+- [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) — Qwen3 HuggingFace ASR
+- [bilibili-api-python](https://github.com/Nemo2011/bilibili-api) — Bilibili API
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — Media download
+- [OpenAI SDK](https://github.com/openai/openai-python) — LLM client
+- [rich](https://github.com/Textualize/rich) — Terminal UI
+
+### License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+<a id="chinese"></a>
+## 中文
+
+**bilibot** 是 B 站视频笔记助手 CLI 工具：获取视频元数据与字幕，调用大模型生成结构化 Markdown 笔记。
+
+支持三种本地语音识别后端：**Qwen3-ASR GGUF**、**Qwen3-ASR (HuggingFace)**、**Whisper (faster-whisper)**。`auto` 模式自动选择最优方案。
+
+### 快速开始
+
+```bash
 git clone https://github.com/anomalyco/bilibot
 cd bilibot
 uv sync
@@ -25,150 +156,90 @@ uv run bilibot BVxxxx
 uv run bilibot 1xxxxxxxxx
 ```
 
-> 如果复制的是带 `?`、`&` 参数的完整链接，在终端中请**用引号包裹 URL**，避免 shell 把 `?` 当通配符、`&` 当后台执行符。
+> 带 `?`、`&` 参数的链接请用引号包裹，避免 shell 误解析。
 
-## ASR 后端
+### 配置
 
-bilibot 支持三层 ASR 后端，`auto` 模式按以下优先级自动选择：
+复制 `.env.example` 为 `.env`，填入 LLM 接口地址和密钥：
+
+```env
+LLM_BASE_URL=http://localhost:5001/v1
+LLM_API_KEY=your-key-here
+LLM_MODEL=deepseek-v4-pro
+```
+
+只需配置 `LLM_BASE_URL` 和 `LLM_API_KEY` 即可使用，其余均有合理默认值。
+
+### ASR 后端
 
 | 优先级 | 后端 | 条件 | 模型大小 |
 |--------|------|------|----------|
-| 1 | **gguf** (ONNX + llama.cpp Q4_K_M) | ONNX Runtime + llama.dll 可用 | ~1.8 GB |
-| 2 | **qwen3** (HuggingFace BF16) | ≥6 GB VRAM | ~3.4 GB |
+| 1 | **gguf** (ONNX + llama.cpp) | ONNX Runtime + llama.cpp 库 | ~1.8 GB |
+| 2 | **qwen3** (HuggingFace BF16) | ≥6 GB 显存 | ~3.4 GB |
 | 3 | **whisper** (faster-whisper) | 始终可用 | 0.15–3 GB |
 
-### GGUF 后端（推荐）
-
-Qwen3-ASR Q4_K_M 量化 + ONNX encoder + llama.cpp decoder。当前中文 ASR 性价比最优。
+#### GGUF 后端（推荐）
 
 ```bash
-# 安装依赖
 uv sync --extra gguf
-
-# 配置环境变量（模型目录 + llama.cpp DLL 目录）
 export ASR_GGUF_MODEL_DIR=/path/to/Qwen3-ASR-1.7B-GGUF
 export ASR_GGUF_LLAMA_BIN=/path/to/llama.cpp/bin
-
-# 使用
 uv run bilibot summarize BVxxxx
 ```
 
-模型可以从 HuggingFace 下载或自行转换：
+模型从 [HuggingFace](https://huggingface.co/HaujetZhao/Qwen3-ASR-1.7B-GGUF) 下载，llama.cpp 库从 [Releases](https://github.com/ggml-org/llama.cpp/releases) 获取。
 
-```
-模型目录/
-  qwen3_asr_encoder_frontend.fp16.onnx
-  qwen3_asr_encoder_backend.fp16.onnx
-  qwen3_asr_llm.q4_k.gguf
-```
-
-llama.cpp 预编译 DLL 可从 [llama.cpp Releases](https://github.com/ggml-org/llama.cpp/releases) 下载，放入 `bilibot/_gguf_core/bin/` 或通过 `ASR_GGUF_LLAMA_BIN` 指定。
-
-### Qwen3-ASR BF16 后端
-
-HuggingFace 全精度模型，首次运行自动下载缓存。
+#### Qwen3 BF16 后端
 
 ```bash
 uv sync --extra qwen3
 uv run bilibot summarize BVxxxx --asr-backend qwen3
 ```
 
-### Whisper 后端
-
-老牌方案，始终可用，无需额外安装。
+#### Whisper 后端
 
 ```bash
 uv run bilibot summarize BVxxxx --asr-backend whisper --asr-preset accurate
 ```
 
-## 命令
+### 命令
 
 ```bash
 uv run bilibot summarize <url>                  # 完整流程
-uv run bilibot summarize <url> --no-llm         # 仅提取字幕（跳过 LLM 后处理与笔记）
+uv run bilibot summarize <url> --no-llm         # 仅提取字幕
 uv run bilibot summarize <url> --force-asr      # 跳过 B 站字幕，强制 ASR
-uv run bilibot summarize <url> --postprocess-subtitles  # 启用 LLM 字幕后处理
-uv run bilibot summarize <url> --asr-backend qwen3
-uv run bilibot summarize <url> --asr-backend gguf
+uv run bilibot summarize <url> --json           # JSON 输出（供脚本/Agent 使用）
+uv run bilibot summarize <url> --quiet          # 仅输出文件路径
 uv run bilibot info <url>                       # 仅获取元数据
-uv run bilibot download <url>                   # 下载视频文件
-uv run bilibot doctor                           # 查看环境 & ASR 推荐
+uv run bilibot info <url> --json                # 元数据 JSON 输出
+uv run bilibot download <url>                   # 下载视频
+uv run bilibot download <url> --json            # 输出文件路径 JSON
+uv run bilibot gen-notes <bvid>                 # 从已有字幕重新生成笔记
+uv run bilibot doctor                           # 查看本机环境
+uv run bilibot doctor --json                    # 本机环境 JSON 输出
 ```
 
-## 常用选项
+### 输出文件
 
-| 选项 | 默认值 | 说明 |
-|------|--------|------|
-| `--asr-backend` | `auto` | ASR 后端：`auto`/`whisper`/`qwen3`/`gguf` |
-| `--asr-preset` | `auto` | Whisper 预设：`fast`/`balanced`/`accurate`/`turbo`/`best`/`auto` |
-| `--asr-model` | 自动 | 模型名或本地路径 |
-| `--asr-device` | 自动 | cpu / cuda |
-| `--asr-gguf-model-dir` | 环境变量 | GGUF 模型目录 |
-| `--output-dir` | `data` | 输出目录 |
-| `--language` | `zh` | 字幕/转写语言 |
-| `--llm-base-url` | `.env` | LLM 接口地址 |
-| `--llm-model` | `.env` | LLM 模型名 |
-| `--postprocess-subtitles` | 关闭 | LLM 字幕后处理 |
-
-完整选项见 `bilibot summarize --help`。
-
-## 输出文件
-
-`data/{bvid}/` 目录下生成，文件名以视频标题为前缀（安全截断至 60 字符，特殊字符替换为 `_`）：
+`data/{bvid}/` 目录下生成：
 
 | 文件 | 说明 |
 |------|------|
-| `{标题}_信息.json` | 视频元数据（含标签、字幕轨道摘要） |
-| `{标题}_字幕.json` | 结构化字幕/转写（后处理后） |
+| `{标题}_信息.json` | 视频元数据 |
+| `{标题}_字幕.json` | 结构化字幕 |
 | `{标题}_字幕.txt` | 纯文本字幕 |
-| `{标题}_字幕原文.json` | 原始字幕（后处理前，仅当启用 `--postprocess-subtitles` 时） |
-| `{标题}_字幕原文.txt` | 原始纯文本字幕 |
 | `{标题}_笔记.md` | LLM 生成的结构化笔记 |
 
-> 旧版本生成的 `metadata.json`、`transcript.json`、`notes.md` 等文件仍可正常读取，新运行默认生成上述命名格式。
-
-### 辅助脚本
-
-```bash
-# 从已有字幕直接生成笔记（无需重新提取）
-python gen_notes.py BV1YkR1BXEow
-```
-
-## 环境变量
-
-```env
-# 后端选择
-ASR_BACKEND=auto
-ASR_MODEL=
-
-# GGUF
-ASR_GGUF_MODEL_DIR=
-ASR_GGUF_LLAMA_BIN=
-
-# LLM
-LLM_BASE_URL=http://localhost:5001/v1
-LLM_API_KEY=replace-with-your-key
-LLM_MODEL=deepseek-v4-pro
-
-# B 站认证
-BILI_SESSDATA=
-BILI_JCT=
-BILI_BUVID3=
-
-# 其他见 .env.example
-```
-
-## 技术栈
-
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — Whisper ASR
-- [Qwen3-ASR GGUF](https://github.com/HaujetZhao/Qwen3-ASR-GGUF) — ONNX + llama.cpp ASR
-- [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) — Qwen3 HuggingFace ASR
-- [bilibili-api-python](https://github.com/Nemo2011/bilibili-api) — B 站 API
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — 视频/音频下载
-- [OpenAI SDK](https://github.com/openai/openai-python) — LLM 调用
-- [rich](https://github.com/Textualize/rich) — 终端输出
-
-## 依赖
+### 环境要求
 
 - Python ≥ 3.12
-- [uv](https://github.com/astral-sh/uv) 管理依赖
+- [uv](https://github.com/astral-sh/uv)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)（依赖自动安装，推荐系统包管理器安装）
+
+### 技术栈
+
+同上 English 部分。
+
+### 许可证
+
+MIT — 详见 [LICENSE](LICENSE)。
