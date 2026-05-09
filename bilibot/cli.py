@@ -20,8 +20,9 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from .asr import ASR_PRESETS, WHISPER_MODEL_IDS, detect_runtime, resolve_asr_plan, resolve_backend
+from .asr import ASR_PRESETS, QWEN3_1_7B_MIN_VRAM_MB, WHISPER_MODEL_IDS, detect_runtime, resolve_asr_plan, resolve_backend
 from .config import Settings, load_settings
+from .downloader import DEFAULT_FORMAT, download_video
 from .extractor import extract
 from .models import format_timestamp
 from .pipeline import PipelineResult, analyze_url
@@ -47,6 +48,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_info(args)
         if args.command == "doctor":
             return run_doctor(args)
+        if args.command == "download":
+            return run_download(args)
     except KeyboardInterrupt:
         console.print("\n[red]已中断[/red]")
         return 130
@@ -88,6 +91,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", help="Show local runtime and ASR recommendations")
     doctor.add_argument("--json", action="store_true", help="Print raw runtime JSON")
+
+    download = subparsers.add_parser("download", help="Download Bilibili video")
+    download.add_argument("video", nargs="+", metavar="VIDEO", help="Bilibili URL, BV id, or BV suffix")
+    download.add_argument(
+        "-o", "--output-dir", default=".",
+        help="Output directory (default: current directory)",
+    )
+    download.add_argument(
+        "-f", "--format", default=None,
+        help="yt-dlp format selector (default: best up to 720P, no login needed)",
+    )
+    download.add_argument(
+        "--cookie-file", default="",
+        help="Netscape cookie file for premium (1080P+) access",
+    )
+    download.add_argument(
+        "--merge-format", default="mp4",
+        help="Container format after merging streams (default: mp4)",
+    )
 
     return parser
 
@@ -323,6 +345,24 @@ def run_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_download(args: argparse.Namespace) -> int:
+    video = _video_input(args.video)
+    fmt = args.format or DEFAULT_FORMAT
+    try:
+        path = download_video(
+            video,
+            output_dir=args.output_dir,
+            fmt=fmt,
+            cookie_file=args.cookie_file,
+            merge_output_format=args.merge_format,
+        )
+        console.print(f"[green]下载完成：[/green]{path}")
+        return 0
+    except Exception as exc:
+        console.print(f"[red]下载失败：{exc}[/red]")
+        return 1
+
+
 class RichProgressReporter:
     def __init__(self, console: Console, *, verbose: bool = False):
         self.console = console
@@ -461,7 +501,7 @@ def _print_result(result: PipelineResult) -> None:
 def _normalize_argv(argv: list[str]) -> list[str]:
     if not argv:
         return argv
-    commands = {"summarize", "info", "doctor", "-h", "--help"}
+    commands = {"summarize", "info", "doctor", "download", "-h", "--help"}
     if argv[0] not in commands:
         return ["summarize", *argv]
     return argv
