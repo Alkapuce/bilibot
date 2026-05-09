@@ -256,15 +256,23 @@ def _fallback_parse_json_array(json_str: str) -> Any:
         pass
 
     # 2. Extract individual objects via regex (handles severely malformed output)
+    # Handles: {"index": 0, "text": "some \"quoted\" text"}
     objects = re.findall(
         r'\{\s*"index"\s*:\s*(\d+)\s*,\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}',
         repaired,
     )
     if objects:
         result: list[dict[str, Any]] = []
-        for idx_str, txt in objects:
+        for idx_str, escaped_text in objects:
             try:
-                result.append({"index": int(idx_str), "text": txt})
+                # Unescape common JSON string escapes (\\", \\\\, \\n, \\t)
+                unescaped = (
+                    escaped_text.replace('\\"', '"')
+                    .replace("\\\\", "\\")
+                    .replace("\\n", "\n")
+                    .replace("\\t", "\t")
+                )
+                result.append({"index": int(idx_str), "text": unescaped})
             except (ValueError, TypeError):
                 continue
         return result

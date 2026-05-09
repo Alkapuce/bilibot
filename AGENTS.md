@@ -13,18 +13,25 @@ bilibot/
 ├── bilibot/           # Python 包（入口 & 核心逻辑）
 │   ├── __init__.py    # 包标识
 │   ├── __main__.py    # `python -m bilibot` 入口
-│   ├── cli.py         # argparse CLI 定义 & Rich 输出
+│   ├── cli.py         # argparse CLI 定义 & 入口（~180 行）
+│   ├── cli_cmds.py    # 各子命令 handler 实现（~260 行）
+│   ├── cli_ui.py      # Rich 终端输出 & 进度组件（~140 行）
 │   ├── config.py      # Settings dataclass + 环境变量加载（python-dotenv）
 │   ├── models.py      # 共享数据模型：Transcript, TranscriptSegment 等
 │   ├── extractor.py   # B 站 API 元数据/字幕提取（bilibili-api-python）
-│   ├── transcriber.py # 音频下载（API 直链 → yt-dlp 回退）+ faster-whisper ASR
+│   ├── downloader.py  # 媒体下载：视频(yt-dlp) + 音频(API直链→yt-dlp回退)
+│   ├── transcriber.py # faster-whisper ASR 转录 & 后端路由（~130 行）
 │   ├── asr.py         # 硬件检测、runtime 探测、ASR preset 解析
 │   ├── llm.py         # OpenAI 兼容 LLM 客户端封装
 │   ├── summarizer.py  # LLM 笔记生成（分 chunk 发送 + 汇总）
 │   ├── postprocessor.py # 字幕后处理（LLM 清理标点/错别字）
+│   ├── gen_notes.py   # 从已有字幕重新生成笔记（bilibot gen-notes）
 │   ├── pipeline.py    # 端到端工作流编排（analyze_url）
 │   ├── progress.py    # 进度事件协议 & callback 抽象
-│   └── storage.py     # 文件写入：metadata.json / transcript.* / notes.md
+│   ├── storage.py     # 文件写入：{标题}_信息.json / {标题}_字幕.json / {标题}_笔记.md
+│   ├── gguf_asr_backend.py   # Qwen3-ASR GGUF 后端（ONNX + llama.cpp）
+│   ├── qwen_asr_backend.py   # Qwen3-ASR HuggingFace 后端
+│   └── _gguf_core/    # llama.cpp ctypes 绑定 & ONNX encoder 引擎
 ├── data/              # 运行时输出（git ignored）
 ├── .env.example       # 可提交的配置模板
 ├── pyproject.toml     # 项目元数据 & 依赖（hatchling build）

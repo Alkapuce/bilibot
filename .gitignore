@@ -8,6 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+env/
 
 # Local config and generated outputs
 .env
@@ -15,3 +17,25 @@ data/
 *.mp3
 *.m4a
 *.wav
+*.mp4
+*.m4s
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Models (large binary files)
+models/
+*.onnx
+*.gguf
+

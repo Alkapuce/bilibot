@@ -49,7 +49,7 @@ def analyze_url(
         f"视频信息获取完成：{info.bvid}，字幕轨道 {len(info.subtitles)} 条",
     )
 
-    transcript = None
+    transcript: Transcript | None = None
     if not force_asr:
         subtitle = select_subtitle(info.subtitles, preferred_language=settings.language)
         if subtitle:
@@ -59,7 +59,11 @@ def analyze_url(
                 "subtitle",
                 f"使用 B站已有字幕：{subtitle.get('lan') or subtitle.get('lan_code') or 'unknown'}",
             )
-            transcript = transcript_from_subtitle(subtitle)
+            candidate = transcript_from_subtitle(subtitle)
+            if candidate.segments:
+                transcript = candidate
+            else:
+                emit(progress, "log", "subtitle", "B站字幕无有效段落，回退 ASR")
 
     if transcript is None:
         emit(progress, "log", "subtitle", "未找到可用字幕，下载音频并进行语音转文本")
@@ -80,13 +84,13 @@ def analyze_url(
 
     if no_llm:
         emit(progress, "log", "llm_summarize", "跳过 LLM 总结")
-        notes = render_basic_notes(info, transcript)
+        notes = render_basic_notes(info, transcript, "已通过 --no-llm 跳过 LLM 总结。")
     else:
         try:
             notes = summarize_video(info, transcript, settings, progress=progress)
         except Exception as exc:
             emit(progress, "log", "llm_summarize", f"LLM 总结失败: {exc}")
-            notes = render_basic_notes(info, transcript)
+            notes = render_basic_notes(info, transcript, f"LLM 总结失败：{exc}")
 
     emit(progress, "task_start", "storage", "写入笔记文件")
     notes_path = save_notes_artifact(settings.output_dir, info.bvid, notes, title=info.title)
@@ -102,6 +106,7 @@ def analyze_url(
 
 
 def select_subtitle(subtitles: list[dict[str, Any]], preferred_language: str = "zh") -> dict[str, Any] | None:
+    """Select the best-matching subtitle track, returning None if nothing matches."""
     if not subtitles:
         return None
 
@@ -114,7 +119,8 @@ def select_subtitle(subtitles: list[dict[str, Any]], preferred_language: str = "
             return 90
         return 0
 
-    return sorted(subtitles, key=score, reverse=True)[0]
+    best = sorted(subtitles, key=score, reverse=True)[0]
+    return best if score(best) > 0 else None
 
 
 def transcript_from_subtitle(subtitle: dict[str, Any]) -> Transcript:

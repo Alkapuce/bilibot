@@ -135,7 +135,7 @@ def transcribe_url(
 ) -> Transcript:
     import tempfile
 
-    from .transcriber import download_audio
+    from .downloader import download_audio
 
     with tempfile.TemporaryDirectory() as tmpdir:
         emit(progress, "log", "download_audio", "准备下载音频")
