@@ -85,11 +85,13 @@ uv run bilibot summarize BVxxxx --asr-backend whisper --asr-preset accurate
 
 ```bash
 uv run bilibot summarize <url>                  # 完整流程
-uv run bilibot summarize <url> --no-llm         # 仅提取字幕
+uv run bilibot summarize <url> --no-llm         # 仅提取字幕（跳过 LLM 后处理与笔记）
 uv run bilibot summarize <url> --force-asr      # 跳过 B 站字幕，强制 ASR
+uv run bilibot summarize <url> --postprocess-subtitles  # 启用 LLM 字幕后处理
 uv run bilibot summarize <url> --asr-backend qwen3
 uv run bilibot summarize <url> --asr-backend gguf
 uv run bilibot info <url>                       # 仅获取元数据
+uv run bilibot download <url>                   # 下载视频文件
 uv run bilibot doctor                           # 查看环境 & ASR 推荐
 ```
 
@@ -112,14 +114,25 @@ uv run bilibot doctor                           # 查看环境 & ASR 推荐
 
 ## 输出文件
 
-`data/{bvid}/` 目录下生成：
+`data/{bvid}/` 目录下生成，文件名以视频标题为前缀（安全截断至 60 字符，特殊字符替换为 `_`）：
 
 | 文件 | 说明 |
 |------|------|
-| `metadata.json` | 视频元数据 |
-| `transcript.json` | 结构化字幕/转写 |
-| `transcript.md` | 带时间戳的完整文本 |
-| `notes.md` | LLM 生成的结构化笔记 |
+| `{标题}_信息.json` | 视频元数据（含标签、字幕轨道摘要） |
+| `{标题}_字幕.json` | 结构化字幕/转写（后处理后） |
+| `{标题}_字幕.txt` | 纯文本字幕 |
+| `{标题}_字幕原文.json` | 原始字幕（后处理前，仅当启用 `--postprocess-subtitles` 时） |
+| `{标题}_字幕原文.txt` | 原始纯文本字幕 |
+| `{标题}_笔记.md` | LLM 生成的结构化笔记 |
+
+> 旧版本生成的 `metadata.json`、`transcript.json`、`notes.md` 等文件仍可正常读取，新运行默认生成上述命名格式。
+
+### 辅助脚本
+
+```bash
+# 从已有字幕直接生成笔记（无需重新提取）
+python gen_notes.py BV1YkR1BXEow
+```
 
 ## 环境变量
 

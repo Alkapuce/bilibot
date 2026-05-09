@@ -89,7 +89,7 @@ def analyze_url(
             notes = render_basic_notes(info, transcript)
 
     emit(progress, "task_start", "storage", "写入笔记文件")
-    notes_path = save_notes_artifact(settings.output_dir, info.bvid, notes)
+    notes_path = save_notes_artifact(settings.output_dir, info.bvid, notes, title=info.title)
     emit(progress, "task_done", "storage", "笔记文件写入完成")
     paths = {**transcript_paths, "notes": notes_path}
     return PipelineResult(

@@ -177,6 +177,7 @@ def _summarize_single(
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
+        task_name="llm_summarize",
         progress=progress,
     )
 
@@ -209,6 +210,7 @@ def _summarize_chunk(
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
+        task_name="llm_summarize",
         progress=progress,
     )
 
@@ -253,5 +255,6 @@ def _merge_notes(
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
+        task_name="llm_summarize",
         progress=progress,
     )

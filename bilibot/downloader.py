@@ -66,6 +66,7 @@ def download_video(
         "-f", fmt,
         "--merge-output-format", merge_output_format,
         "-o", out_path,
+        "--no-simulate",
         "--print", "filename",
         canonical_url,
     ]

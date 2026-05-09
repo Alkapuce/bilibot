@@ -23,6 +23,7 @@ class VideoInfo:
     url: str
     subtitles: list[dict[str, Any]] = field(default_factory=list)
     cover: str = ""
+    tags: list[str] = field(default_factory=list)
 
 
 def parse_bvid(url: str) -> str:
@@ -39,8 +40,13 @@ def parse_bvid(url: str) -> str:
         import httpx
 
         resp = httpx.get(url, follow_redirects=True, timeout=10)
+        # Extract BV号 from redirect URL first — the final page may return
+        # 412 (tracking params expired) but the redirect URL already contains the BV号
+        bvid = _find_bvid(str(resp.url))
+        if bvid:
+            return bvid
         resp.raise_for_status()
-        bvid = _find_bvid(str(resp.url)) or _find_bvid(resp.text)
+        bvid = _find_bvid(resp.text)
         if bvid:
             return bvid
 
@@ -82,6 +88,13 @@ async def _fetch(
         url=url,
         cover=cover,
     )
+
+    # Try to get tags (video classification labels, helpful for domain context)
+    try:
+        tag_list = await v.get_tags()
+        vi.tags = [item.get("tag_name", "") for item in (tag_list or []) if item.get("tag_name")]
+    except Exception:
+        pass
 
     # Try to get subtitles
     try:

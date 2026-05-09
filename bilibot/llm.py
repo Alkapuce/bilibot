@@ -63,8 +63,8 @@ class LLMClient:
 
         if progress is not None:
             kwargs["stream"] = True
-            tokens = 0
-            chunks: list[str] = []
+            chars = 0
+            pieces: list[str] = []
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=list(messages),
@@ -73,25 +73,25 @@ class LLMClient:
             for chunk in stream:
                 delta = chunk.choices[0].delta
                 if delta.content:
-                    chunks.append(delta.content)
-                    tokens += 1
-                    if tokens % 30 == 0:
+                    pieces.append(delta.content)
+                    chars += len(delta.content)
+                    if chars % 150 == 0:
                         emit(
                             progress,
                             "task_update",
                             task_name,
-                            f"LLM 生成中 ({tokens} tokens)",
-                            advance=30,
+                            f"LLM 生成中 ({chars} 字符)",
+                            advance=150,
                         )
-            if tokens % 30 != 0:
+            if chars % 150 != 0:
                 emit(
                     progress,
                     "task_update",
                     task_name,
-                    f"LLM 生成完成 ({tokens} tokens)",
-                    advance=tokens % 30,
+                    f"LLM 生成完成 ({chars} 字符)",
+                    advance=chars % 150,
                 )
-            content = "".join(chunks).strip()
+            content = "".join(pieces).strip()
             return content
 
         response = self.client.chat.completions.create(

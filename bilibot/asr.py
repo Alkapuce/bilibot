@@ -99,12 +99,14 @@ def resolve_asr_plan(settings: Settings, runtime: RuntimeInfo | None = None) -> 
     best_gpu = max(runtime.gpus, key=lambda gpu: gpu.memory_mb, default=None)
     gpu_mb = best_gpu.memory_mb if best_gpu else 0
     has_usable_cuda = runtime.cuda_device_count > 0 and gpu_mb >= 4096
+    has_min_cuda = runtime.cuda_device_count > 0 and gpu_mb >= 2048
 
     model, device, compute_type, batch_size, vad_filter, reason = _preset_plan(
         preset,
         runtime,
         gpu_mb,
         has_usable_cuda,
+        has_min_cuda,
     )
 
     if settings.asr_model:
@@ -140,6 +142,7 @@ def _preset_plan(
     runtime: RuntimeInfo,
     gpu_mb: int,
     has_usable_cuda: bool,
+    has_min_cuda: bool,
 ) -> tuple[str, str, str, int, bool, str]:
     if preset == "best":
         if gpu_mb >= 11000:
@@ -172,8 +175,8 @@ def _preset_plan(
         return ("medium", "cpu", "int8", 0, True, "best 预设：无 4GB+ GPU，使用 CPU medium。")
 
     if preset == "fast":
-        if has_usable_cuda:
-            return ("small", "cuda", "int8_float16", 4, True, "fast 预设：CUDA 可用，优先速度。")
+        if has_min_cuda:
+            return ("small", "cuda", "int8_float16", 4, True, "fast 预设：GPU ≥2GB，优先速度。")
         return ("base", "cpu", "int8", 0, True, "fast 预设：CPU int8，优先速度。")
 
     if preset == "accurate":
@@ -216,8 +219,8 @@ def _preset_plan(
                 True,
                 "balanced 预设：8GB+ GPU，使用 distil-large-v3。",
             )
-        if has_usable_cuda:
-            return ("small", "cuda", "int8_float16", 4, True, "balanced 预设：4GB+ GPU，使用 small。")
+        if has_min_cuda:
+            return ("small", "cuda", "int8_float16", 4, True, "balanced 预设：GPU ≥2GB，使用 small。")
         return ("small", "cpu", "int8", 0, True, "balanced 预设：CPU small，兼顾速度和准确率。")
 
     if gpu_mb >= 11000:
@@ -233,6 +236,15 @@ def _preset_plan(
         return ("large-v3", "cuda", "float16", 8, True, "auto：检测到 8GB+ GPU，使用 large-v3。")
     if gpu_mb >= 4096:
         return ("turbo", "cuda", "int8_float16", 4, True, "auto：检测到 4GB+ GPU，使用 turbo。")
+    if has_min_cuda:
+        return (
+            "small",
+            "cuda",
+            "int8_float16",
+            4,
+            True,
+            f"auto：检测到 {gpu_mb}MB GPU，使用 small int8_float16 批处理。",
+        )
     if runtime.cuda_device_count > 0 and gpu_mb:
         return (
             "small",
@@ -240,7 +252,7 @@ def _preset_plan(
             "int8",
             0,
             True,
-            f"auto：检测到 {gpu_mb}MB GPU，显存偏小，默认改用 CPU small 以避免 OOM。",
+            f"auto：检测到 {gpu_mb}MB GPU，显存过小（<2GB），使用 CPU small。",
         )
     return ("small", "cpu", "int8", 0, True, "auto：未检测到可用 CUDA GPU，使用 CPU small。")
 

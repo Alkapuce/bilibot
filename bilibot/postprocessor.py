@@ -122,14 +122,26 @@ def _postprocess_chunk(
         }
         for index, segment in chunk
     ]
+
+    # Build context: video title, description, author, and tags for domain awareness
+    context_lines = [f"视频标题：{info.title}"]
+    if info.author:
+        context_lines.append(f"作者：{info.author}")
+    if info.desc:
+        context_lines.append(f"简介：{info.desc}")
+    if info.tags:
+        context_lines.append(f"标签：{'、'.join(info.tags)}")
+    context = "\n".join(context_lines)
+
     prompt = f"""请对字幕文本做后处理，返回 JSON 数组。
 
-视频标题：{info.title}
+{context}
 字幕来源：{transcript.source}
 处理风格：{style}
 
 规则：
 - 只优化 text 字段，可修正错别字、ASR 误识别、标点、明显口语断裂。
+- 可参考标题、简介、标签中的术语来纠正 ASR 对专业名词的误识别。
 - 不要新增字幕中没有的信息，不要改变说话含义。
 - 必须保留输入的 index 数量与顺序。
 - 不要输出 Markdown，不要输出解释。
@@ -147,7 +159,13 @@ def _postprocess_chunk(
             task_name="subtitle_postprocess",
             progress=progress,
         )
-    except Exception:
+    except Exception as exc:
+        emit(
+            progress,
+            "log",
+            "subtitle_postprocess",
+            f"字幕后处理分块 LLM 调用失败，保留原文 ({len(chunk)} 段): {exc}",
+        )
         return {}
     items = _parse_json_array(response)
     replacements: dict[int, str] = {}
@@ -186,17 +204,69 @@ def _split_segments(
 
 
 def _parse_json_array(text: str) -> list[Any]:
+    """Extract a JSON array from LLM response text.
+
+    Handles various markdown code fence formats and performs fallback
+    repair for common JSON syntax issues in LLM output.
+    """
     stripped = text.strip()
+
+    # ── Remove markdown code fences ──────────────────────────────
     if stripped.startswith("```"):
-        stripped = stripped.strip("`")
-        if "\n" in stripped:
-            stripped = stripped.split("\n", 1)[1]
+        stripped = stripped.removeprefix("```")
+        # Skip optional language tag line (e.g. "json")
+        stripped = stripped.lstrip()
+        nl = stripped.find("\n")
+        if nl != -1:
+            tag = stripped[:nl].strip()
+            if tag and len(tag) < 20 and "[" not in tag:
+                stripped = stripped[nl + 1:]
+        # Remove trailing closing fence
+        stripped = stripped.rstrip()
+        if stripped.endswith("```"):
+            stripped = stripped[:-3]
+        stripped = stripped.strip()
+
+    # ── Locate JSON array boundaries ─────────────────────────────
     start = stripped.find("[")
     end = stripped.rfind("]")
     if start == -1 or end == -1 or end < start:
         return []
+
+    json_str = stripped[start : end + 1]
+
+    # ── Parse with fallback repair ───────────────────────────────
     try:
-        parsed = json.loads(stripped[start : end + 1])
+        parsed = json.loads(json_str)
     except json.JSONDecodeError:
-        return []
+        parsed = _fallback_parse_json_array(json_str)
+
     return parsed if isinstance(parsed, list) else []
+
+
+def _fallback_parse_json_array(json_str: str) -> Any:
+    """Try to repair and parse malformed JSON array from LLM output."""
+    import re
+
+    # 1. Strip trailing commas before ] or }
+    repaired = re.sub(r",\s*([}\]])", r"\1", json_str)
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Extract individual objects via regex (handles severely malformed output)
+    objects = re.findall(
+        r'\{\s*"index"\s*:\s*(\d+)\s*,\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}',
+        repaired,
+    )
+    if objects:
+        result: list[dict[str, Any]] = []
+        for idx_str, txt in objects:
+            try:
+                result.append({"index": int(idx_str), "text": txt})
+            except (ValueError, TypeError):
+                continue
+        return result
+
+    return []

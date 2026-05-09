@@ -50,8 +50,10 @@ class Transcript:
 
     def to_captions(self) -> str:
         import re
-        full = "".join(s.text for s in self.segments if s.text.strip())
-        lines = [l.strip() for l in re.split(r"(?<=[。！？])", full) if l.strip()]
+        # Join segments with space to avoid word-merging at boundaries,
+        # then split by Chinese sentence-ending punctuation for readability.
+        full = " ".join(s.text for s in self.segments if s.text.strip())
+        lines = [l.strip() for l in re.split(r"(?<=[。！？；\n])", full) if l.strip()]
         return "\n".join(lines) + "\n"
 
     def to_dict(self) -> dict[str, Any]:

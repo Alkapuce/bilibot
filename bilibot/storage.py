@@ -3,12 +3,31 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from .extractor import VideoInfo
 from .models import Transcript, jsonable
+
+
+_MAX_TITLE_LEN = 60
+
+
+def safe_filename(title: str, max_len: int = _MAX_TITLE_LEN) -> str:
+    """Sanitize video title for use in a filename.
+
+    Replaces characters unsafe on Windows/Linux filesystems with ``_``,
+    collapses consecutive underscores, strips leading/trailing separators,
+    and truncates to *max_len* characters.
+    """
+    safe = re.sub(r'[\\/:*?"<>|\n\r\t]', "_", title)
+    safe = re.sub(r"_+", "_", safe)
+    safe = safe.strip("_. ")
+    if len(safe) > max_len:
+        safe = safe[:max_len].rstrip("_")
+    return safe or "untitled"
 
 
 def output_root(base_dir: Path, bvid: str) -> Path:
@@ -25,25 +44,28 @@ def save_transcript_artifacts(
     raw_transcript: Transcript | None = None,
 ) -> dict[str, Path]:
     root = output_root(base_dir, info.bvid)
+    prefix = safe_filename(info.title)
+
     paths: dict[str, Path] = {
-        "metadata": root / "metadata.json",
-        "transcript_json": root / "transcript.json",
-        "captions_txt": root / "captions.txt",
+        "metadata": root / f"{prefix}_信息.json",
+        "transcript_json": root / f"{prefix}_字幕.json",
+        "captions_txt": root / f"{prefix}_字幕.txt",
     }
     _write_json(paths["metadata"], _metadata_payload(info))
     _write_json(paths["transcript_json"], transcript.to_dict())
     paths["captions_txt"].write_text(transcript.to_captions(), encoding="utf-8")
     if raw_transcript is not None:
-        paths["transcript_raw_json"] = root / "transcript_raw.json"
-        paths["captions_raw_txt"] = root / "captions_raw.txt"
+        paths["transcript_raw_json"] = root / f"{prefix}_字幕原文.json"
+        paths["captions_raw_txt"] = root / f"{prefix}_字幕原文.txt"
         _write_json(paths["transcript_raw_json"], raw_transcript.to_dict())
         paths["captions_raw_txt"].write_text(raw_transcript.to_captions(), encoding="utf-8")
     return paths
 
 
-def save_notes_artifact(base_dir: Path, bvid: str, notes: str) -> Path:
+def save_notes_artifact(base_dir: Path, bvid: str, notes: str, *, title: str = "") -> Path:
     root = output_root(base_dir, bvid)
-    path = root / "notes.md"
+    prefix = safe_filename(title) if title else bvid
+    path = root / f"{prefix}_笔记.md"
     path.write_text(notes.rstrip() + "\n", encoding="utf-8")
     return path
 
@@ -57,7 +79,7 @@ def save_artifacts(
     raw_transcript: Transcript | None = None,
 ) -> dict[str, Path]:
     paths = save_transcript_artifacts(base_dir, info, transcript, raw_transcript=raw_transcript)
-    notes_path = save_notes_artifact(base_dir, info.bvid, notes)
+    notes_path = save_notes_artifact(base_dir, info.bvid, notes, title=info.title)
     paths["notes"] = notes_path
     return paths
 
@@ -65,6 +87,7 @@ def save_artifacts(
 def _metadata_payload(info: VideoInfo) -> dict[str, Any]:
     payload = asdict(info)
     subtitles = payload.pop("subtitles", [])
+    tags = payload.pop("tags", [])
     payload["subtitle_tracks"] = [
         {
             "lan": item.get("lan", ""),
@@ -74,6 +97,7 @@ def _metadata_payload(info: VideoInfo) -> dict[str, Any]:
         }
         for item in subtitles
     ]
+    payload["tags"] = tags
     return payload
 
 

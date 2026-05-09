@@ -18,7 +18,7 @@ class Settings:
     llm_timeout: float = 180.0
     llm_temperature: float | None = None
     llm_max_tokens: int | None = None
-    chunk_chars: int = 8000
+    chunk_chars: int = 200000
 
     output_dir: Path = Path("data")
     language: str = "zh"
@@ -46,7 +46,7 @@ class Settings:
     subtitle_postprocess_api_key: str = ""
     subtitle_postprocess_model: str = ""
     subtitle_postprocess_temperature: float | None = None
-    subtitle_postprocess_chunk_chars: int = 6000
+    subtitle_postprocess_chunk_chars: int = 200000
     subtitle_postprocess_style: str = "clean"
 
     download_timeout: float = 60.0
