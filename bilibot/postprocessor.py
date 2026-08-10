@@ -28,7 +28,8 @@ def postprocess_transcript(
     try:
         return _postprocess_transcript_impl(info, transcript, settings, progress=progress)
     except Exception as exc:
-        emit(progress, "log", "subtitle_postprocess", f"字幕后处理失败: {exc}，使用原始字幕")
+        import traceback
+        emit(progress, "log", "subtitle_postprocess", f"字幕后处理失败: {exc}\n{traceback.format_exc()}")
         return transcript
 
 
@@ -51,7 +52,10 @@ def _postprocess_transcript_impl(
         ),
         chunk_chars=settings.subtitle_postprocess_chunk_chars,
     )
-    llm = LLMClient(llm_settings)
+    llm_kwargs: dict[str, Any] = {}
+    if llm_settings.subtitle_postprocess_disable_thinking:
+        llm_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    llm = LLMClient(llm_settings, **llm_kwargs)
     chunks = _split_segments(transcript.segments, settings.subtitle_postprocess_chunk_chars)
     new_segments = list(transcript.segments)
     emit(
@@ -142,6 +146,7 @@ def _postprocess_chunk(
 规则：
 - 只优化 text 字段，可修正错别字、ASR 误识别、标点、明显口语断裂。
 - 可参考标题、简介、标签中的术语来纠正 ASR 对专业名词的误识别。
+- 略去广告内容（口播推广、赞助商介绍等），将广告对应的 text 设为 "(广告，已略去)"。
 - 不要新增字幕中没有的信息，不要改变说话含义。
 - 必须保留输入的 index 数量与顺序。
 - 不要输出 Markdown，不要输出解释。

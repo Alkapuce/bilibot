@@ -48,6 +48,7 @@ class Settings:
     subtitle_postprocess_temperature: float | None = None
     subtitle_postprocess_chunk_chars: int = 200000
     subtitle_postprocess_style: str = "clean"
+    subtitle_postprocess_disable_thinking: bool = True
 
     download_timeout: float = 60.0
     download_chunk_size: int = 1024 * 1024
@@ -114,6 +115,10 @@ def load_settings(**overrides: Any) -> Settings:
         subtitle_postprocess_style=os.getenv(
             "SUBTITLE_POSTPROCESS_STYLE",
             Settings.subtitle_postprocess_style,
+        ),
+        subtitle_postprocess_disable_thinking=_env_bool(
+            "SUBTITLE_POSTPROCESS_DISABLE_THINKING",
+            Settings.subtitle_postprocess_disable_thinking,
         ),
         download_timeout=_env_float("DOWNLOAD_TIMEOUT", Settings.download_timeout),
         download_chunk_size=_env_int("DOWNLOAD_CHUNK_SIZE", Settings.download_chunk_size),

@@ -43,12 +43,12 @@ def run_summarize(args: argparse.Namespace) -> int:
 
     try:
         if reporter is None:
-            result = analyze_url(video, settings, force_asr=args.force_asr, no_llm=args.no_llm)
+            result = analyze_url(video, settings, force_asr=args.force_asr, no_notes=args.no_notes)
         else:
             with reporter:
                 result = analyze_url(
                     video, settings,
-                    force_asr=args.force_asr, no_llm=args.no_llm,
+                    force_asr=args.force_asr, no_notes=args.no_notes,
                     progress=reporter,
                 )
 

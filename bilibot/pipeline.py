@@ -31,7 +31,7 @@ def analyze_url(
     settings: Settings,
     *,
     force_asr: bool = False,
-    no_llm: bool = False,
+    no_notes: bool = False,
     progress: ProgressCallback | None = None,
 ) -> PipelineResult:
     emit(progress, "task_start", "metadata", "获取视频信息和 B站字幕")
@@ -67,7 +67,8 @@ def analyze_url(
 
     if transcript is None:
         emit(progress, "log", "subtitle", "未找到可用字幕，下载音频并进行语音转文本")
-        transcript = transcribe_url(info.url, settings, progress=progress)
+        # 使用原始 URL（保留 ?p=N 参数）而非 info.url（extractor 会丢失分 P 参数）
+        transcript = transcribe_url(url, settings, progress=progress)
 
     raw_transcript = transcript
     if settings.subtitle_postprocess:
@@ -82,9 +83,9 @@ def analyze_url(
     )
     emit(progress, "task_done", "storage", "字幕/转录文件写入完成")
 
-    if no_llm:
-        emit(progress, "log", "llm_summarize", "跳过 LLM 总结")
-        notes = render_basic_notes(info, transcript, "已通过 --no-llm 跳过 LLM 总结。")
+    if no_notes:
+        emit(progress, "log", "llm_summarize", "跳过 LLM 笔记")
+        notes = render_basic_notes(info, transcript, "已通过 --no-notes 跳过 LLM 笔记生成。")
     else:
         try:
             notes = summarize_video(info, transcript, settings, progress=progress)

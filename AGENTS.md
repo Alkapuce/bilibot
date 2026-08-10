@@ -44,7 +44,7 @@ bilibot/
 ```bash
 uv sync                          # 创建/更新虚拟环境
 uv run bilibot --help            # 验证 CLI 入口
-uv run bilibot summarize BVxxxx --no-llm   # 仅提取字幕，不调 LLM
+uv run bilibot summarize BVxxxx --no-notes   # 仅提取字幕，不生成笔记
 uv run bilibot info BVxxxx       # 仅获取元数据
 uv run bilibot doctor            # 检查本地 ASR 环境
 uv run python -m compileall bilibot   # 快速语法检查（无测试套件时）

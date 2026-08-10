@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
             """\
             examples:
               bilibot BV1WdokBNEcn
-              bilibot 1WdokBNEcn --no-llm
+              bilibot 1WdokBNEcn --no-notes
               bilibot summarize https://www.bilibili.com/video/BV1WdokBNEcn/ --asr-preset accurate
               bilibot summarize BV1WdokBNEcn --postprocess-subtitles --subtitle-postprocess-model deepseek-v4-pro
               bilibot doctor
@@ -77,7 +77,8 @@ def build_parser() -> argparse.ArgumentParser:
     summarize = subparsers.add_parser("summarize", help="Analyze one Bilibili video")
     summarize.add_argument("video", nargs="+", metavar="VIDEO", help="Bilibili URL, BV id, or BV suffix")
     summarize.add_argument("--force-asr", action="store_true", help="Ignore Bilibili subtitles and run ASR")
-    summarize.add_argument("--no-llm", action="store_true", help="Only save metadata and transcript")
+    summarize.add_argument("--no-notes", action="store_true", help="Skip LLM note generation (subtitle postprocessing still runs)")
+    summarize.add_argument("--no-llm", action="store_true", dest="no_notes", help=argparse.SUPPRESS)  # deprecated alias
     summarize.add_argument("--json", action="store_true", help="Output result summary as JSON")
     add_common_options(summarize)
 

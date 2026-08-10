@@ -25,7 +25,7 @@ uv sync
    ```bash
    uv run bilibot doctor                     # check environment
    uv run bilibot info BVxxxx                # test metadata extraction
-   uv run bilibot summarize BVxxxx --no-llm  # test transcript extraction
+   uv run bilibot summarize BVxxxx --no-notes  # test transcript extraction
    ```
 
 5. Open a PR with a clear description of the change.

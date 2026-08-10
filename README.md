@@ -82,7 +82,7 @@ uv run bilibot summarize BVxxxx --asr-backend whisper --asr-preset accurate
 
 ```bash
 uv run bilibot summarize <url>                  # Full pipeline
-uv run bilibot summarize <url> --no-llm         # Extract transcript only
+uv run bilibot summarize <url> --no-notes         # Extract transcript only (skip notes, postprocess still runs)
 uv run bilibot summarize <url> --force-asr      # Skip Bilibili subtitles
 uv run bilibot summarize <url> --json           # JSON output (for scripts/agents)
 uv run bilibot summarize <url> --quiet          # Only print file paths
@@ -206,7 +206,7 @@ uv run bilibot summarize BVxxxx --asr-backend whisper --asr-preset accurate
 
 ```bash
 uv run bilibot summarize <url>                  # 完整流程
-uv run bilibot summarize <url> --no-llm         # 仅提取字幕
+uv run bilibot summarize <url> --no-notes         # 仅提取字幕（不生成笔记，后处理照跑）
 uv run bilibot summarize <url> --force-asr      # 跳过 B 站字幕，强制 ASR
 uv run bilibot summarize <url> --json           # JSON 输出（供脚本/Agent 使用）
 uv run bilibot summarize <url> --quiet          # 仅输出文件路径

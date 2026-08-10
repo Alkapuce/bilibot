@@ -80,6 +80,20 @@ def download_video(
 
 # ── audio download (orchestrator) ───────────────────────────────────────────
 
+import re as _re
+
+
+def _url_has_page(url: str) -> bool:
+    """Check if URL has a page parameter (multi-part video)."""
+    return bool(_re.search(r"[?&]p=\d+", url))
+
+
+def _url_page_number(url: str) -> int | None:
+    """Extract page number from URL, or None."""
+    m = _re.search(r"[?&]p=(\d+)", url)
+    return int(m.group(1)) if m else None
+
+
 def download_audio(
     url: str,
     output_dir: str,
@@ -98,6 +112,8 @@ def download_audio(
     """Download the best available audio (B站 API → yt-dlp fallback)."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
+    # Use B站 API for direct audio download (handles multi-page correctly)
+    page = _url_page_number(url)
 
     try:
         bvid = parse_bvid(url)
@@ -113,6 +129,7 @@ def download_audio(
                     cookie_file=cookie_file, sessdata=sessdata,
                     bili_jct=bili_jct, buvid3=buvid3,
                     timeout=timeout, chunk_size=chunk_size, progress=progress,
+                    page=page,
                 )
             )
         except Exception as exc:
@@ -152,6 +169,7 @@ async def _download_bilibili_audio(
     timeout: float = 60.0,
     chunk_size: int = 1024 * 1024,
     progress: ProgressCallback | None = None,
+    page: int | None = None,
 ) -> str:
     cookie_values = _load_bili_cookie_values(cookie_file)
     sessdata = sessdata or cookie_values.get("SESSDATA", "")
@@ -161,7 +179,7 @@ async def _download_bilibili_audio(
 
     v = video.Video(bvid=bvid, credential=credential)
     info = await v.get_info()
-    cid = _first_cid(info)
+    cid = _first_cid(info, page=page)
     if not cid:
         raise RuntimeError("未能获取视频 cid")
 
@@ -227,9 +245,12 @@ def _download_audio_with_ytdlp(
 
 # ── internal helpers ────────────────────────────────────────────────────────
 
-def _first_cid(info: dict[str, Any]) -> int | None:
+def _first_cid(info: dict[str, Any], page: int | None = None) -> int | None:
     pages = info.get("pages", [])
-    return pages[0].get("cid") if pages else info.get("cid")
+    if pages:
+        idx = (page - 1) if page and 1 <= page <= len(pages) else 0
+        return pages[idx].get("cid")
+    return info.get("cid")
 
 
 def _select_dash_audio(play_url: dict[str, Any]) -> dict[str, Any] | None:

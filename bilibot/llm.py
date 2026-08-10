@@ -25,11 +25,13 @@ class LLMClient:
         timeout: float | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        extra_body: dict[str, Any] | None = None,
     ):
         self.settings = settings
         self.model = model or settings.llm_model
         self.temperature = temperature if temperature is not None else settings.llm_temperature
         self.max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
+        self.extra_body = extra_body
         self.client = OpenAI(
             base_url=base_url or settings.llm_base_url,
             api_key=api_key or settings.llm_api_key,
@@ -60,6 +62,8 @@ class LLMClient:
             kwargs["temperature"] = self.temperature
         if self.max_tokens is not None:
             kwargs["max_tokens"] = self.max_tokens
+        if self.extra_body is not None:
+            kwargs["extra_body"] = self.extra_body
 
         if progress is not None:
             kwargs["stream"] = True
