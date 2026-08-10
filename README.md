@@ -90,6 +90,8 @@ uv run bilibot info <url>                       # Metadata only
 uv run bilibot info <url> --json                # Metadata as JSON
 uv run bilibot download <url>                   # Download video
 uv run bilibot download <url> --json            # Output file path as JSON
+uv run bilibot asr ./meeting.m4a                # Transcribe local audio/video
+uv run bilibot asr ./meeting.m4a --json         # Output artifact paths as JSON
 uv run bilibot gen-notes <bvid>                 # Regenerate notes from cache
 uv run bilibot doctor                           # System check
 uv run bilibot doctor --json                    # System check as JSON
@@ -105,6 +107,8 @@ All files go to `data/{bvid}/`:
 | `{title}_字幕.json` | Structured transcript |
 | `{title}_字幕.txt` | Plain-text transcript |
 | `{title}_笔记.md` | LLM-generated notes |
+
+Local audio transcription writes to `data/local_asr/{audio-stem}/` with `transcript.json`, `transcript.md`, and `captions.txt`.
 
 ### Requirements
 
@@ -214,6 +218,8 @@ uv run bilibot info <url>                       # 仅获取元数据
 uv run bilibot info <url> --json                # 元数据 JSON 输出
 uv run bilibot download <url>                   # 下载视频
 uv run bilibot download <url> --json            # 输出文件路径 JSON
+uv run bilibot asr ./meeting.m4a                # 转写本地音频/视频
+uv run bilibot asr ./meeting.m4a --json         # 输出产物路径 JSON
 uv run bilibot gen-notes <bvid>                 # 从已有字幕重新生成笔记
 uv run bilibot doctor                           # 查看本机环境
 uv run bilibot doctor --json                    # 本机环境 JSON 输出
@@ -229,6 +235,8 @@ uv run bilibot doctor --json                    # 本机环境 JSON 输出
 | `{标题}_字幕.json` | 结构化字幕 |
 | `{标题}_字幕.txt` | 纯文本字幕 |
 | `{标题}_笔记.md` | LLM 生成的结构化笔记 |
+
+本地音频转写写入 `data/local_asr/{音频文件名}/`，包含 `transcript.json`、`transcript.md` 和 `captions.txt`。
 
 ### 环境要求
 

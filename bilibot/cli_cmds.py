@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
@@ -15,9 +16,9 @@ from .config import Settings, load_settings
 from .downloader import DEFAULT_FORMAT, download_video
 from .extractor import extract
 from .gen_notes import run as run_gen_notes
-from .models import format_timestamp, jsonable
+from .models import Transcript, format_timestamp, jsonable
 from .pipeline import analyze_url
-from .storage import _metadata_payload
+from .storage import _metadata_payload, save_local_transcript_artifacts
 
 
 # ── exit codes (follow sysexits.h conventions loosely) ──────────────────────
@@ -105,6 +106,46 @@ def run_info(args: argparse.Namespace) -> int:
     table.add_row("链接", info.url)
     console.print(table)
     return EX_OK
+
+
+# ── local ASR ───────────────────────────────────────────────────────────────
+
+def run_asr(args: argparse.Namespace) -> int:
+    from .cli import console
+
+    settings = _settings_from_args(args)
+    reporter = None if args.quiet else RichProgressReporter(console, verbose=args.verbose)
+    output_base = settings.output_dir / "local_asr"
+
+    try:
+        paths_by_audio: dict[Path, dict[str, Path]] = {}
+        if reporter is None:
+            for audio in args.audio:
+                audio_path = _resolve_audio_path(audio)
+                transcript = _transcribe_local_audio(audio_path, settings)
+                paths_by_audio[audio_path] = save_local_transcript_artifacts(output_base, audio_path, transcript)
+        else:
+            with reporter:
+                for audio in args.audio:
+                    audio_path = _resolve_audio_path(audio)
+                    transcript = _transcribe_local_audio(audio_path, settings, progress=reporter)
+                    paths_by_audio[audio_path] = save_local_transcript_artifacts(output_base, audio_path, transcript)
+
+        if args.json:
+            console.print_json(
+                data={
+                    str(audio): {name: str(path) for name, path in paths.items()}
+                    for audio, paths in paths_by_audio.items()
+                }
+            )
+        else:
+            _print_asr_result(paths_by_audio, console)
+        return EX_OK
+    except Exception as exc:
+        if args.json:
+            return _json_err(str(exc), console)
+        console.print(f"[red]本地转写失败：{exc}[/red]")
+        return EX_ERR
 
 
 # ── doctor ──────────────────────────────────────────────────────────────────
@@ -261,6 +302,45 @@ def run_download(args: argparse.Namespace) -> int:
             return _json_err(str(exc), console)
         console.print(f"[red]下载失败：{exc}[/red]")
         return EX_ERR
+
+
+def _print_asr_result(paths_by_audio: dict[Path, dict[str, Path]], console: Console) -> None:
+    console.print(Panel(f"已转写 {len(paths_by_audio)} 个本地音频文件", title="完成", border_style="green"))
+    artifacts = Table(title="Artifacts")
+    artifacts.add_column("Audio", style="cyan", no_wrap=True)
+    artifacts.add_column("Name", style="cyan", no_wrap=True)
+    artifacts.add_column("Path")
+    for audio_path, paths in paths_by_audio.items():
+        for name, path in paths.items():
+            artifacts.add_row(audio_path.name, name, str(path))
+    console.print(artifacts)
+
+
+def _resolve_audio_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"本地音频文件不存在：{path}")
+    return path.resolve()
+
+
+def _transcribe_local_audio(audio_path: Path, settings: Settings, *, progress=None) -> Transcript:
+    runtime = detect_runtime()
+    gpu_mb = max((gpu.memory_mb for gpu in runtime.gpus), default=0)
+    backend = resolve_backend(settings, gpu_mb)
+
+    if backend == "gguf":
+        from .gguf_asr_backend import transcribe
+
+        return transcribe(str(audio_path), settings, progress=progress)
+    if backend == "qwen3":
+        from .qwen_asr_backend import transcribe
+
+        return transcribe(str(audio_path), settings, progress=progress)
+
+    from .transcriber import transcribe
+
+    plan = resolve_asr_plan(settings, runtime)
+    return transcribe(str(audio_path), settings, plan=plan, progress=progress)
 
 
 def _settings_from_args(args: argparse.Namespace) -> Settings:

@@ -36,6 +36,23 @@ def output_root(base_dir: Path, bvid: str) -> Path:
     return path
 
 
+def save_local_transcript_artifacts(
+    base_dir: Path,
+    audio_path: Path,
+    transcript: Transcript,
+) -> dict[str, Path]:
+    root = output_root(base_dir, safe_filename(audio_path.stem))
+    paths: dict[str, Path] = {
+        "transcript_json": root / "transcript.json",
+        "transcript_md": root / "transcript.md",
+        "captions_txt": root / "captions.txt",
+    }
+    _write_json(paths["transcript_json"], transcript.to_dict())
+    paths["transcript_md"].write_text(transcript.to_markdown(), encoding="utf-8")
+    paths["captions_txt"].write_text(transcript.to_captions(), encoding="utf-8")
+    return paths
+
+
 def save_transcript_artifacts(
     base_dir: Path,
     info: VideoInfo,

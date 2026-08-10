@@ -16,6 +16,7 @@ from .cli_cmds import (
     EX_OK,
     run_doctor,
     run_download,
+    run_asr,
     run_gen_notes_cmd,
     run_info,
     run_summarize,
@@ -41,6 +42,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_doctor(args)
         if args.command == "download":
             return run_download(args)
+        if args.command == "asr":
+            return run_asr(args)
         if args.command == "gen-notes":
             return run_gen_notes_cmd(args)
     except KeyboardInterrupt:
@@ -66,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
               bilibot 1WdokBNEcn --no-notes
               bilibot summarize https://www.bilibili.com/video/BV1WdokBNEcn/ --asr-preset accurate
               bilibot summarize BV1WdokBNEcn --postprocess-subtitles --subtitle-postprocess-model deepseek-v4-pro
+              bilibot asr ./meeting.m4a --asr-backend auto
               bilibot doctor
             """
         ),
@@ -105,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
     download.add_argument("--cookie-file", default="", help="Netscape cookie file for premium (1080P+) access")
     download.add_argument("--merge-format", default="mp4", help="Container format after merging streams (default: mp4)")
     download.add_argument("--json", action="store_true", help="Output file path as JSON")
+
+    # ── asr ────────────────────────────────────────────────────────────
+    asr_cmd = subparsers.add_parser("asr", help="Transcribe local audio/video files")
+    asr_cmd.add_argument("audio", nargs="+", metavar="AUDIO", help="Local audio/video file to transcribe")
+    asr_cmd.add_argument("--json", action="store_true", help="Output artifact paths as JSON")
+    add_common_options(asr_cmd)
 
     return parser
 
@@ -172,7 +182,7 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
 def _normalize_argv(argv: list[str]) -> list[str]:
     if not argv:
         return argv
-    commands = {"summarize", "info", "doctor", "download", "gen-notes", "-h", "--help", "-V", "--version"}
+    commands = {"summarize", "info", "doctor", "download", "asr", "gen-notes", "-h", "--help", "-V", "--version"}
     if argv[0] not in commands:
         return ["summarize", *argv]
     return argv
