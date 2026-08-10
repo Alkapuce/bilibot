@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from bilibot.cli import _normalize_argv, build_parser, main
+from bilibot.gguf_asr_backend import _clean_mtmd_output, _find_files
 from bilibot.models import Transcript, TranscriptSegment
 from bilibot.qwen_asr_backend import _resolve_language
 from bilibot.storage import save_local_transcript_artifacts
@@ -35,6 +36,23 @@ class LocalAsrCliTests(unittest.TestCase):
         self.assertEqual(args.asr_preset, "best")
         self.assertEqual(args.output_dir, "out")
         self.assertTrue(args.json)
+
+    def test_asr_command_accepts_gguf_model_dir(self) -> None:
+        parser = build_parser()
+
+        args = parser.parse_args(
+            [
+                "asr",
+                "meeting.wav",
+                "--asr-backend",
+                "gguf",
+                "--asr-gguf-model-dir",
+                ".models/Qwen3-ASR-1.7B-GGUF",
+            ]
+        )
+
+        self.assertEqual(args.asr_backend, "gguf")
+        self.assertEqual(args.asr_gguf_model_dir, ".models/Qwen3-ASR-1.7B-GGUF")
 
     def test_asr_command_is_not_normalized_to_summarize(self) -> None:
         self.assertEqual(_normalize_argv(["asr", "meeting.m4a"]), ["asr", "meeting.m4a"])
@@ -85,6 +103,31 @@ class QwenAsrBackendTests(unittest.TestCase):
         self.assertEqual(_resolve_language("zh"), "Chinese")
         self.assertEqual(_resolve_language("en"), "English")
         self.assertIsNone(_resolve_language("auto"))
+
+
+class GgufAsrBackendTests(unittest.TestCase):
+    def test_find_files_accepts_llama_cpp_mtmd_layout(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "Qwen3-ASR-1.7B-Q8_0.gguf").write_bytes(b"model")
+            (root / "Qwen3-ASR-1.7B-bf16.gguf").write_bytes(b"model-bf16")
+            (root / "mmproj-Qwen3-ASR-1.7B-Q8_0.gguf").write_bytes(b"mmproj")
+
+            files = _find_files(root)
+
+            self.assertEqual(files["layout"], "mtmd")
+            self.assertEqual(Path(files["model"]).name, "Qwen3-ASR-1.7B-Q8_0.gguf")
+            self.assertEqual(Path(files["mmproj"]).name, "mmproj-Qwen3-ASR-1.7B-Q8_0.gguf")
+
+    def test_clean_mtmd_output_removes_prompt_and_markers(self) -> None:
+        prompt = "Transcribe the audio in English. Output only the transcript text."
+
+        text = _clean_mtmd_output(
+            f"\x1b[32m{prompt}\x1b[0m\nassistant: language English<asr_text>hello world<|im_end|>[end of text]",
+            prompt,
+        )
+
+        self.assertEqual(text, "hello world")
 
 
 if __name__ == "__main__":

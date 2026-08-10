@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import os
 import platform
+import shutil
 import subprocess
 from dataclasses import dataclass
 
@@ -353,8 +354,16 @@ def _supported_compute_types(device: str) -> list[str]:
 
 
 def _nvidia_gpus() -> list[GpuInfo]:
+    nvidia_smi = shutil.which("nvidia-smi")
+    if not nvidia_smi and os.name != "nt":
+        wsl_nvidia_smi = "/usr/lib/wsl/lib/nvidia-smi"
+        if os.path.exists(wsl_nvidia_smi):
+            nvidia_smi = wsl_nvidia_smi
+    if not nvidia_smi:
+        return []
+
     cmd = [
-        "nvidia-smi",
+        nvidia_smi,
         "--query-gpu=name,memory.total,driver_version",
         "--format=csv,noheader,nounits",
     ]

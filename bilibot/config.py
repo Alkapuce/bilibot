@@ -40,6 +40,9 @@ class Settings:
     asr_local_files_only: bool = False
     asr_hotwords: str = ""
     asr_initial_prompt: str = ""
+    asr_gguf_model_dir: str = ""
+    asr_gguf_llama_bin: str = ""
+    asr_gguf_cli: str = "llama-mtmd-cli"
 
     subtitle_postprocess: bool = False
     subtitle_postprocess_base_url: str = ""
@@ -94,6 +97,9 @@ def load_settings(**overrides: Any) -> Settings:
         asr_local_files_only=_env_bool("ASR_LOCAL_FILES_ONLY", Settings.asr_local_files_only),
         asr_hotwords=os.getenv("ASR_HOTWORDS", Settings.asr_hotwords),
         asr_initial_prompt=os.getenv("ASR_INITIAL_PROMPT", Settings.asr_initial_prompt),
+        asr_gguf_model_dir=os.getenv("ASR_GGUF_MODEL_DIR", Settings.asr_gguf_model_dir),
+        asr_gguf_llama_bin=os.getenv("ASR_GGUF_LLAMA_BIN", Settings.asr_gguf_llama_bin),
+        asr_gguf_cli=os.getenv("ASR_GGUF_CLI", Settings.asr_gguf_cli),
         subtitle_postprocess=_env_bool("SUBTITLE_POSTPROCESS", Settings.subtitle_postprocess),
         subtitle_postprocess_base_url=os.getenv(
             "SUBTITLE_POSTPROCESS_BASE_URL",

@@ -50,7 +50,7 @@ At minimum, only `LLM_BASE_URL` and `LLM_API_KEY` are required. All other settin
 
 | Priority | Backend | Requirement | Size |
 |----------|---------|-------------|------|
-| 1 | **gguf** (ONNX + llama.cpp) | ONNX Runtime + llama.cpp lib | ~1.8 GB |
+| 1 | **gguf** (llama.cpp) | Recent `llama-mtmd-cli` + GGUF model/mmproj | ~2.4 GB |
 | 2 | **qwen3** (HuggingFace BF16) | ≥6 GB VRAM | ~3.4 GB |
 | 3 | **whisper** (faster-whisper) | Always available | 0.15–3 GB |
 
@@ -59,11 +59,11 @@ At minimum, only `LLM_BASE_URL` and `LLM_API_KEY` are required. All other settin
 ```bash
 uv sync --extra gguf
 export ASR_GGUF_MODEL_DIR=/path/to/Qwen3-ASR-1.7B-GGUF
-export ASR_GGUF_LLAMA_BIN=/path/to/llama.cpp/bin
+export ASR_GGUF_CLI=/path/to/llama.cpp/build/bin/llama-mtmd-cli
 uv run bilibot summarize BVxxxx
 ```
 
-Download the GGUF model from [HuggingFace](https://huggingface.co/HaujetZhao/Qwen3-ASR-1.7B-GGUF) and llama.cpp binaries from [Releases](https://github.com/ggml-org/llama.cpp/releases).
+Download the GGUF model from [HuggingFace](https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF). Use a recent llama.cpp build; older distro packages may not support the Qwen3 audio projector.
 
 #### Qwen3 BF16
 
@@ -119,7 +119,7 @@ Local audio transcription writes to `data/local_asr/{audio-stem}/` with `transcr
 ### Tech Stack
 
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — Whisper ASR
-- [Qwen3-ASR GGUF](https://github.com/HaujetZhao/Qwen3-ASR-GGUF) — ONNX + llama.cpp ASR
+- [Qwen3-ASR GGUF](https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF) — llama.cpp GGUF ASR
 - [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) — Qwen3 HuggingFace ASR
 - [bilibili-api-python](https://github.com/Nemo2011/bilibili-api) — Bilibili API
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) — Media download
@@ -178,7 +178,7 @@ LLM_MODEL=deepseek-v4-pro
 
 | 优先级 | 后端 | 条件 | 模型大小 |
 |--------|------|------|----------|
-| 1 | **gguf** (ONNX + llama.cpp) | ONNX Runtime + llama.cpp 库 | ~1.8 GB |
+| 1 | **gguf** (llama.cpp) | 新版 `llama-mtmd-cli` + GGUF 模型/mmproj | ~2.4 GB |
 | 2 | **qwen3** (HuggingFace BF16) | ≥6 GB 显存 | ~3.4 GB |
 | 3 | **whisper** (faster-whisper) | 始终可用 | 0.15–3 GB |
 
@@ -187,11 +187,11 @@ LLM_MODEL=deepseek-v4-pro
 ```bash
 uv sync --extra gguf
 export ASR_GGUF_MODEL_DIR=/path/to/Qwen3-ASR-1.7B-GGUF
-export ASR_GGUF_LLAMA_BIN=/path/to/llama.cpp/bin
+export ASR_GGUF_CLI=/path/to/llama.cpp/build/bin/llama-mtmd-cli
 uv run bilibot summarize BVxxxx
 ```
 
-模型从 [HuggingFace](https://huggingface.co/HaujetZhao/Qwen3-ASR-1.7B-GGUF) 下载，llama.cpp 库从 [Releases](https://github.com/ggml-org/llama.cpp/releases) 获取。
+模型从 [HuggingFace](https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF) 下载。请使用较新的 llama.cpp；较旧的发行版包可能不支持 Qwen3 audio projector。
 
 #### Qwen3 BF16 后端
 

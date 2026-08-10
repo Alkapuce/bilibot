@@ -370,6 +370,8 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         asr_local_files_only=args.asr_local_files_only,
         asr_hotwords=args.asr_hotwords,
         asr_initial_prompt=args.asr_initial_prompt,
+        asr_gguf_model_dir=args.asr_gguf_model_dir,
+        asr_gguf_cli=args.asr_gguf_cli,
         llm_base_url=args.llm_base_url,
         llm_api_key=args.llm_api_key,
         llm_model=args.llm_model,

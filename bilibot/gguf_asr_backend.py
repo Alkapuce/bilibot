@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,44 +22,73 @@ logger = logging.getLogger("bilibot.gguf_asr")
 
 GGUF_MODEL_IDS: dict[str, str] = {
     "qwen3-asr-1.7b": "Qwen3-ASR-1.7B",
+    "qwen3-asr-1.7b-q8_0": "Qwen3-ASR-1.7B GGUF Q8_0",
+    "qwen3-asr-0.6b-q8_0": "Qwen3-ASR-0.6B GGUF Q8_0",
 }
 
 _HF_GGUF_ALIASES: dict[str, str] = {
-    "qwen3-asr-1.7b": "HaujetZhao/Qwen3-ASR-1.7B-GGUF",
+    "qwen3-asr-1.7b": "ggml-org/Qwen3-ASR-1.7B-GGUF",
+    "qwen3-asr-1.7b-q8_0": "ggml-org/Qwen3-ASR-1.7B-GGUF",
+    "qwen3-asr-0.6b-q8_0": "ggml-org/Qwen3-ASR-0.6B-GGUF",
 }
 
 
 def _check_available(settings: Settings) -> bool:
     try:
-        _resolve_llama_bin(settings)
+        model_dir = _model_dir(settings)
+        files = _find_files(model_dir)
+        if files["layout"] == "mtmd":
+            _resolve_mtmd_cli(settings)
+        else:
+            _resolve_llama_bin(settings)
         return True
     except Exception:
         return False
 
 
 def _model_dir(settings: Settings) -> Path:
-    model = settings.asr_model
+    candidates = [
+        settings.asr_gguf_model_dir,
+        settings.asr_model if settings.asr_model else "",
+        os.getenv("ASR_GGUF_MODEL_DIR", ""),
+    ]
+    for value in candidates:
+        if value:
+            p = Path(value).expanduser()
+            if p.is_dir():
+                return p.resolve()
 
-    if model:
-        p = Path(model)
-        if p.is_dir():
-            return p.resolve()
-
-    env_dir = os.getenv("ASR_GGUF_MODEL_DIR", "")
-    if env_dir and Path(env_dir).is_dir():
-        return Path(env_dir)
-
-    default = Path("models") / "Qwen3-ASR-1.7B-GGUF"
-    if default.is_dir():
-        return default.resolve()
+    for default in (
+        Path(".models") / "Qwen3-ASR-1.7B-GGUF",
+        Path(".models") / "Qwen3-ASR-0.6B-GGUF",
+        Path("models") / "Qwen3-ASR-1.7B-GGUF",
+        Path("models") / "Qwen3-ASR-0.6B-GGUF",
+    ):
+        if default.is_dir():
+            return default.resolve()
 
     raise FileNotFoundError(
         "未找到 GGUF 模型目录。请设置 ASR_GGUF_MODEL_DIR 环境变量，\n"
-        "或将模型放到 models/Qwen3-ASR-1.7B-GGUF/ 目录。"
+        "或将模型放到 .models/Qwen3-ASR-1.7B-GGUF/ 目录。"
     )
 
 
 def _find_files(model_dir: Path) -> dict[str, str]:
+    legacy_files = _find_legacy_files(model_dir)
+    if legacy_files:
+        return legacy_files
+
+    mtmd_files = _find_mtmd_files(model_dir)
+    if mtmd_files:
+        return mtmd_files
+
+    raise FileNotFoundError(
+        f"在 {model_dir} 中未找到可用 GGUF ASR 文件。期望官方 llama.cpp "
+        "GGUF+mmproj 布局，或旧版 ONNX encoder + GGUF decoder 布局。"
+    )
+
+
+def _find_legacy_files(model_dir: Path) -> dict[str, str] | None:
     candidates = {
         "encoder_frontend": [
             "qwen3_asr_encoder_frontend.fp16.onnx",
@@ -80,20 +111,58 @@ def _find_files(model_dir: Path) -> dict[str, str]:
                 result[key] = str(p)
                 break
         if key not in result:
-            raise FileNotFoundError(
-                f"在 {model_dir} 中未找到 {key} 文件，期望: {filenames}"
-            )
+            return None
+    result["layout"] = "legacy"
     return result
 
 
+def _find_mtmd_files(model_dir: Path) -> dict[str, str] | None:
+    ggufs = [path for path in model_dir.glob("*.gguf") if path.is_file()]
+    mmproj = [path for path in ggufs if "mmproj" in path.name.casefold()]
+    models = [path for path in ggufs if path not in mmproj]
+    if not models or not mmproj:
+        return None
+    return {
+        "layout": "mtmd",
+        "model": str(_preferred_gguf(models)),
+        "mmproj": str(_preferred_gguf(mmproj)),
+    }
+
+
+def _preferred_gguf(paths: list[Path]) -> Path:
+    def rank(path: Path) -> tuple[int, int, str]:
+        name = path.name.casefold()
+        if "q8_0" in name:
+            quant = 0
+        elif "q4" in name:
+            quant = 1
+        elif "q5" in name or "q6" in name:
+            quant = 2
+        elif "bf16" in name or "f16" in name:
+            quant = 3
+        else:
+            quant = 4
+        return (quant, path.stat().st_size, name)
+
+    return sorted(paths, key=rank)[0]
+
+
 def _resolve_llama_bin(settings: Settings) -> str:
-    env_bin = os.getenv("ASR_GGUF_LLAMA_BIN", "")
+    env_bin = settings.asr_gguf_llama_bin or os.getenv("ASR_GGUF_LLAMA_BIN", "")
     if env_bin and Path(env_bin).is_dir():
         return env_bin
 
-    for p in os.environ.get("PATH", "").split(os.pathsep):
-        if (Path(p) / "llama.dll").exists() or (Path(p) / "libllama.so").exists():
-            return p
+    search_paths = [Path(p) for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    search_paths.extend(
+        [
+            Path("/usr/lib/x86_64-linux-gnu/llama"),
+            Path("/usr/local/lib"),
+            Path("/usr/lib"),
+        ]
+    )
+    for p in search_paths:
+        if any((p / name).exists() for name in ("llama.dll", "libllama.so", "libllama.so.0")):
+            return str(p)
 
     bundled = Path(__file__).parent / "_gguf_core" / "bin"
     if bundled.is_dir():
@@ -106,6 +175,17 @@ def _resolve_llama_bin(settings: Settings) -> str:
     )
 
 
+def _resolve_mtmd_cli(settings: Settings) -> str:
+    configured = settings.asr_gguf_cli or os.getenv("ASR_GGUF_CLI", "") or "llama-mtmd-cli"
+    p = Path(configured).expanduser()
+    if p.is_file():
+        return str(p.resolve())
+    found = shutil.which(configured)
+    if found:
+        return found
+    raise FileNotFoundError("未找到 llama-mtmd-cli，请安装 llama.cpp-tools-extra 或设置 ASR_GGUF_CLI")
+
+
 def transcribe(
     audio_path: str,
     settings: Settings,
@@ -116,6 +196,8 @@ def transcribe(
 
     model_dir = _model_dir(settings)
     files = _find_files(model_dir)
+    if files["layout"] == "mtmd":
+        return _transcribe_with_mtmd(audio_path, settings, files, progress=progress)
 
     emit(progress, "task_start", "asr_model_load", f"加载 Qwen3-ASR GGUF 模型: {model_dir}")
 
@@ -142,6 +224,88 @@ def transcribe(
         language=language or "zh",
         segments=segments or [TranscriptSegment(start=0.0, end=0.0, text=text)],
     )
+
+
+def _transcribe_with_mtmd(
+    audio_path: str,
+    settings: Settings,
+    files: dict[str, str],
+    *,
+    progress: ProgressCallback | None = None,
+) -> Transcript:
+    cli = _resolve_mtmd_cli(settings)
+    language = _map_lang(settings.language)
+    prompt = _mtmd_prompt(language)
+    threads = str(settings.asr_cpu_threads or max(1, min(os.cpu_count() or 1, 16)))
+    cmd = [
+        cli,
+        "-m",
+        files["model"],
+        "--mmproj",
+        files["mmproj"],
+        "--audio",
+        audio_path,
+        "-p",
+        prompt,
+        "-n",
+        "512",
+        "--temp",
+        "0",
+        "--threads",
+        threads,
+        "--ctx-size",
+        "4096",
+        "-lv",
+        "1",
+        "--no-perf",
+    ]
+    if settings.asr_device == "cpu":
+        cmd.extend(["--device", "none", "--gpu-layers", "0", "--no-mmproj-offload"])
+
+    emit(progress, "task_start", "asr_transcribe", f"Qwen3-ASR GGUF 识别中：{Path(files['model']).name}")
+    env = os.environ.copy()
+    env.setdefault("LLAMA_LOG_COLORS", "off")
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        if len(detail) > 1200:
+            detail = detail[-1200:]
+        raise RuntimeError(f"llama-mtmd-cli 转写失败：{detail}")
+
+    text = _clean_mtmd_output(result.stdout, prompt)
+    if not text:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"Qwen3-ASR GGUF returned empty result: {detail[-800:]}")
+
+    emit(progress, "task_done", "asr_transcribe", f"Qwen3-ASR GGUF 完成：{len(text)} 字符")
+    duration = _audio_duration(audio_path)
+    return Transcript(
+        source=f"qwen3-gguf/{Path(files['model']).name}",
+        language=language or "zh",
+        segments=[TranscriptSegment(start=0.0, end=round(duration, 1) if duration > 0 else 0.0, text=text)],
+    )
+
+
+def _mtmd_prompt(language: str | None) -> str:
+    if language:
+        return f"Transcribe the audio in {language}. Output only the transcript text."
+    return "Transcribe the audio. Output only the transcript text."
+
+
+def _clean_mtmd_output(output: str, prompt: str) -> str:
+    import re
+
+    text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", output).strip()
+    if text.startswith(prompt):
+        text = text[len(prompt):].strip()
+    text = re.sub(r"^(assistant|Assistant|ASSISTANT)\s*[:：]\s*", "", text).strip()
+    text = re.sub(r"^<\|im_start\|>assistant\s*", "", text).strip()
+    text = re.sub(r"^language\s+[A-Za-z-]+\s*<asr_text>\s*", "", text).strip()
+    text = text.replace("<|im_end|>", "").strip()
+    for marker in ("[end of text]", "<|endoftext|>"):
+        if marker in text:
+            text = text.split(marker, 1)[0].strip()
+    return text
 
 
 def transcribe_url(

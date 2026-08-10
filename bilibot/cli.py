@@ -136,7 +136,8 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
 
     asr = parser.add_argument_group("asr")
     asr.add_argument("--asr-backend", choices=("auto", "whisper", "qwen3", "gguf"), help="ASR backend")
-    asr.add_argument("--asr-gguf-model-dir", help="GGUF model directory (ONNX + GGUF files)")
+    asr.add_argument("--asr-gguf-model-dir", help="GGUF model directory (llama.cpp GGUF+mmproj or legacy ONNX+GGUF files)")
+    asr.add_argument("--asr-gguf-cli", help="llama.cpp multimodal CLI path for GGUF+mmproj models")
     asr.add_argument("--asr-preset", choices=ASR_PRESETS, help="ASR preset, default: auto")
     asr.add_argument("--asr-model", help="ASR model name, HuggingFace path, or local dir")
     asr.add_argument("--whisper-model", dest="asr_model", help="Alias for --asr-model")
