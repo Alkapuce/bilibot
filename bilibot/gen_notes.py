@@ -7,7 +7,6 @@ and *_信息.json files in the output directory without re-extracting.
 from __future__ import annotations
 
 import json
-from glob import glob
 from pathlib import Path
 
 from .config import Settings, load_settings
@@ -29,17 +28,14 @@ def run(bvid: str, settings: Settings | None = None, *, progress: ProgressCallba
     data_dir = output_root(settings.output_dir, bvid)
 
     # Support both new naming ({title}_字幕.json) and legacy (transcript.json)
-    transcript_files = sorted(glob(f"{data_dir}/*_字幕.json"))
-    meta_files = sorted(glob(f"{data_dir}/*_信息.json"))
-    title_files = sorted(glob(f"{data_dir}/*_字幕.txt"))
+    transcript_files = sorted(data_dir.glob("*_字幕.json"))
+    meta_files = sorted(data_dir.glob("*_信息.json"))
 
     # Fallback: legacy filenames (metadata.json / transcript.json / notes.md)
     if not transcript_files:
-        transcript_files = sorted(glob(f"{data_dir}/transcript*.json"))
+        transcript_files = sorted(data_dir.glob("transcript*.json"))
     if not meta_files:
-        meta_files = sorted(glob(f"{data_dir}/metadata.json"))
-    if not title_files:
-        title_files = sorted(glob(f"{data_dir}/*_字幕.txt")) + sorted(glob(f"{data_dir}/captions*.txt"))
+        meta_files = sorted(data_dir.glob("metadata.json"))
 
     if not transcript_files or not meta_files:
         raise FileNotFoundError(
@@ -47,10 +43,8 @@ def run(bvid: str, settings: Settings | None = None, *, progress: ProgressCallba
             f"请先运行: bilibot summarize {bvid}"
         )
 
-    with open(transcript_files[-1]) as f:
-        raw = json.load(f)
-    with open(meta_files[-1]) as f:
-        meta = json.load(f)
+    raw = json.loads(transcript_files[-1].read_text(encoding="utf-8"))
+    meta = json.loads(meta_files[-1].read_text(encoding="utf-8"))
 
     info = VideoInfo(
         bvid=meta.get("bvid", bvid),
@@ -81,5 +75,4 @@ def run(bvid: str, settings: Settings | None = None, *, progress: ProgressCallba
             emit(progress, "log", "gen_notes", f"LLM 调用失败: {exc}，使用基础笔记")
         notes = render_basic_notes(info, transcript, f"LLM 调用失败：{exc}")
 
-    prefix = title_files[-1].rsplit("_字幕.txt", 1)[0].split("/")[-1] if title_files else bvid
     return save_notes_artifact(settings.output_dir, bvid, notes, title=info.title)

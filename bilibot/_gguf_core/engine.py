@@ -41,9 +41,10 @@ class QwenASREngine:
             os.environ["GGML_VK_DISABLE_F16"] = "1"       # 禁止 VulkanFP16 计算（Intel集显fp16有溢出问题）
 
         # 路径解析
-        llm_gguf = os.path.join(config.model_dir, config.llm_fn)
-        frontend_path = os.path.join(config.model_dir, config.encoder_frontend_fn)
-        backend_path = os.path.join(config.model_dir, config.encoder_backend_fn)
+        model_dir = Path(config.model_dir)
+        llm_gguf = str(model_dir / config.llm_fn)
+        frontend_path = str(model_dir / config.encoder_frontend_fn)
+        backend_path = str(model_dir / config.encoder_backend_fn)
 
         # 1. 初始化 Encoder
         self.encoder = QwenAudioEncoder(

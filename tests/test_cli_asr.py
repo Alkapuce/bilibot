@@ -6,7 +6,8 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from bilibot.cli import _normalize_argv, build_parser, main
-from bilibot.gguf_asr_backend import _clean_mtmd_output, _find_files
+from bilibot.downloader import _canonical_bilibili_url
+from bilibot.gguf_asr_backend import _clean_mtmd_output, _contains_any_file, _find_files
 from bilibot.models import Transcript, TranscriptSegment
 from bilibot.qwen_asr_backend import _resolve_language
 from bilibot.storage import save_local_transcript_artifacts
@@ -128,6 +129,20 @@ class GgufAsrBackendTests(unittest.TestCase):
         )
 
         self.assertEqual(text, "hello world")
+
+    def test_contains_any_file_checks_all_patterns(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "libllama.so").write_bytes(b"")
+
+            self.assertTrue(_contains_any_file(root, ("llama.*", "libllama.*")))
+
+
+class DownloaderTests(unittest.TestCase):
+    def test_canonical_bilibili_url_preserves_page_parameter(self) -> None:
+        url = _canonical_bilibili_url("https://www.bilibili.com/video/BV1xxTest123/?p=3", "BV1xxTest123")
+
+        self.assertEqual(url, "https://www.bilibili.com/video/BV1xxTest123?p=3")
 
 
 if __name__ == "__main__":

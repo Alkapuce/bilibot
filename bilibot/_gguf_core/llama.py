@@ -187,9 +187,9 @@ def init_llama_lib():
 
     # 获取库文件所在目录 (模块目录下的 bin)
     if _LIB_DIR is not None:
-        lib_dir = _LIB_DIR
+        lib_dir = Path(_LIB_DIR)
     else:
-        lib_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
+        lib_dir = Path(__file__).resolve().parent / "bin"
 
     # DLL 命名处理
     if sys.platform == "win32":
@@ -205,9 +205,9 @@ def init_llama_lib():
         GGML_BASE_DLL = "libggml-base.so"
         LLAMA_DLL = "libllama.so"
 
-    ggml = ctypes.CDLL(os.path.join(lib_dir, GGML_DLL))
-    ggml_base = ctypes.CDLL(os.path.join(lib_dir, GGML_BASE_DLL))
-    llama = ctypes.CDLL(os.path.join(lib_dir, LLAMA_DLL))
+    ggml = ctypes.CDLL(str(lib_dir / GGML_DLL))
+    ggml_base = ctypes.CDLL(str(lib_dir / GGML_BASE_DLL))
+    llama = ctypes.CDLL(str(lib_dir / LLAMA_DLL))
 
     # 设置日志回调
     LOG_CALLBACK = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)

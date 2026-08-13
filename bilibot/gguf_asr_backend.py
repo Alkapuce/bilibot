@@ -166,7 +166,7 @@ def _resolve_llama_bin(settings: Settings) -> str:
 
     bundled = Path(__file__).parent / "_gguf_core" / "bin"
     if bundled.is_dir():
-        if any(bundled.glob("llama.*") or bundled.glob("libllama.*")):
+        if _contains_any_file(bundled, ("llama.*", "libllama.*")):
             return str(bundled)
 
     raise FileNotFoundError(
@@ -350,16 +350,11 @@ def _create_engine_qwen_asr_gguf(
         onnx_path = str(mod_root / "internal" / "onnxruntime" / "capi")
         if onnx_path not in os.environ.get("PATH", ""):
             os.environ["PATH"] = onnx_path + os.pathsep + os.environ.get("PATH", "")
-        os.add_dll_directory(onnx_path)
+        if hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(onnx_path)
 
-        from qwen_asr_gguf import create_asr_engine, ASREngineConfig
-        config = ASREngineConfig(
-            model_dir=str(model_dir),
-            encoder_frontend_fn=Path(files["encoder_frontend"]).name,
-            encoder_backend_fn=Path(files["encoder_backend"]).name,
-            llm_fn=Path(files["llm"]).name,
-            vulkan_enable=True, chunk_size=25.0, n_ctx=2048, memory_num=2, verbose=False,
-        )
+        from qwen_asr_gguf import create_asr_engine
+
         wrapper = create_asr_engine(
             model_dir=str(model_dir),
             encoder_frontend_fn=Path(files["encoder_frontend"]).name,
@@ -419,6 +414,13 @@ def _find_qwen_asr_gguf_module() -> Path | None:
     return None
 
 
+def _contains_any_file(directory: Path, patterns: tuple[str, ...]) -> bool:
+    for pattern in patterns:
+        if next(directory.glob(pattern), None) is not None:
+            return True
+    return False
+
+
 def _map_lang(language: str | None) -> str | None:
     if not language:
         return None
@@ -456,8 +458,8 @@ def _trim_repetition(text: str) -> str:
     return text
 
 
-def _build_segments(result, audio_path: str) -> list:
-    segs = []
+def _build_segments(result, audio_path: str) -> list[TranscriptSegment]:
+    segs: list[TranscriptSegment] = []
     if hasattr(result, "segments") and result.segments:
         for s in result.segments:
             if isinstance(s, dict):

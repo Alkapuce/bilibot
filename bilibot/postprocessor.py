@@ -56,13 +56,14 @@ def _postprocess_transcript_impl(
     if llm_settings.subtitle_postprocess_disable_thinking:
         llm_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     llm = LLMClient(llm_settings, **llm_kwargs)
+    model_label = llm.model_sequence_label()
     chunks = _split_segments(transcript.segments, settings.subtitle_postprocess_chunk_chars)
     new_segments = list(transcript.segments)
     emit(
         progress,
         "task_start",
         "subtitle_postprocess",
-        f"字幕后处理：{llm_settings.llm_model}",
+        f"字幕后处理：{model_label}",
         total=len(chunks),
         unit="chunk",
     )
@@ -104,7 +105,7 @@ def _postprocess_transcript_impl(
         language=transcript.language,
         segments=new_segments,
         postprocessed=True,
-        postprocess_model=llm_settings.llm_model,
+        postprocess_model=llm.last_model or llm_settings.llm_model,
     )
 
 

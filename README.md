@@ -36,15 +36,20 @@ uv run bilibot 1xxxxxxxxx
 
 ### Setup
 
-Copy `.env.example` to `.env` and fill in your LLM endpoint:
+Copy `.env.example` to `.env` and fill in your LLM endpoints:
 
 ```env
-LLM_BASE_URL=http://localhost:5001/v1
-LLM_API_KEY=your-key-here
-LLM_MODEL=deepseek-v4-pro
+# Default endpoint/key. DeepSeek fallback models use these values.
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_API_KEY=your-deepseek-key
+LLM_MODEL=grok-4.6
+LLM_FALLBACK_MODELS=grok-4.5,dsv4flash,dsv4pro
+LLM_MODEL_PROVIDERS=grok-4.6=grok,grok-4.5=grok,dsv4flash=deepseek,dsv4pro=deepseek
+LLM_PROVIDER_GROK_BASE_URL=https://your-grok-endpoint/v1
+LLM_PROVIDER_GROK_API_KEY=your-grok-key
 ```
 
-At minimum, only `LLM_BASE_URL` and `LLM_API_KEY` are required. All other settings have sensible defaults.
+`LLM_MODEL` is the primary model, and `LLM_FALLBACK_MODELS` is an ordered comma- or space-separated fallback chain. Models listed in `LLM_MODEL_PROVIDERS` use provider-specific keys such as `LLM_PROVIDER_GROK_BASE_URL` / `LLM_PROVIDER_GROK_API_KEY`; models without provider overrides fall back to `LLM_BASE_URL` / `LLM_API_KEY`.
 
 ### ASR Backends
 
@@ -167,12 +172,17 @@ uv run bilibot 1xxxxxxxxx
 复制 `.env.example` 为 `.env`，填入 LLM 接口地址和密钥：
 
 ```env
-LLM_BASE_URL=http://localhost:5001/v1
-LLM_API_KEY=your-key-here
-LLM_MODEL=deepseek-v4-pro
+# 默认接口/密钥。DeepSeek fallback 模型使用这里的值。
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_API_KEY=your-deepseek-key
+LLM_MODEL=grok-4.6
+LLM_FALLBACK_MODELS=grok-4.5,dsv4flash,dsv4pro
+LLM_MODEL_PROVIDERS=grok-4.6=grok,grok-4.5=grok,dsv4flash=deepseek,dsv4pro=deepseek
+LLM_PROVIDER_GROK_BASE_URL=https://your-grok-endpoint/v1
+LLM_PROVIDER_GROK_API_KEY=your-grok-key
 ```
 
-只需配置 `LLM_BASE_URL` 和 `LLM_API_KEY` 即可使用，其余均有合理默认值。
+`LLM_MODEL` 是主模型，`LLM_FALLBACK_MODELS` 是按顺序尝试的 fallback 链路，支持逗号或空格分隔。`LLM_MODEL_PROVIDERS` 里的模型会使用对应 provider 的专属配置，例如 Grok 走 `LLM_PROVIDER_GROK_BASE_URL` / `LLM_PROVIDER_GROK_API_KEY`；没有专属配置的模型会回退使用 `LLM_BASE_URL` / `LLM_API_KEY`。
 
 ### ASR 后端
 

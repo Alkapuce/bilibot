@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -40,12 +39,12 @@ def download_video(
     """Download a Bilibili video and return the output file path."""
     out_dir = Path(output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = os.path.join(str(out_dir), output_template)
+    out_path = str(out_dir / output_template)
 
     bvid = ""
     try:
         bvid = parse_bvid(url)
-        canonical_url = f"https://www.bilibili.com/video/{bvid}"
+        canonical_url = _canonical_bilibili_url(url, bvid)
     except Exception:
         canonical_url = url
 
@@ -59,16 +58,18 @@ def download_video(
         "--no-simulate", "--print", "filename",
         canonical_url,
     ]
-    if cookie_file and os.path.exists(cookie_file):
-        cmd += ["--cookies", cookie_file]
+    cookie_path = Path(cookie_file).expanduser() if cookie_file else None
+    if cookie_path and cookie_path.is_file():
+        cmd += ["--cookies", str(cookie_path)]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"yt-dlp 下载失败：\n{result.stderr}")
 
-    downloaded = result.stdout.strip()
-    if downloaded and os.path.exists(downloaded):
-        return downloaded
+    printed_paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    for downloaded in reversed(printed_paths):
+        if Path(downloaded).exists():
+            return downloaded
 
     for f in out_dir.glob(f"*{bvid}*"):
         return str(f)
@@ -81,6 +82,13 @@ def download_video(
 # ── audio download (orchestrator) ───────────────────────────────────────────
 
 import re as _re
+
+
+def _canonical_bilibili_url(url: str, bvid: str) -> str:
+    """Build a stable Bilibili video URL while preserving explicit page input."""
+    page = _url_page_number(url)
+    suffix = f"?p={page}" if page else ""
+    return f"https://www.bilibili.com/video/{bvid}{suffix}"
 
 
 def _url_has_page(url: str) -> bool:
@@ -215,7 +223,7 @@ def _download_audio_with_ytdlp(
     yt_dlp_audio_quality: str = "5",
     progress: ProgressCallback | None = None,
 ) -> str:
-    out_template = os.path.join(output_dir, "audio.%(ext)s")
+    out_template = str(Path(output_dir) / "audio.%(ext)s")
     cmd = [
         "yt-dlp", "--no-playlist",
         "--user-agent", DEFAULT_USER_AGENT,
@@ -227,8 +235,9 @@ def _download_audio_with_ytdlp(
         "-o", out_template,
         url,
     ]
-    if cookie_file and os.path.exists(cookie_file):
-        cmd += ["--cookies", cookie_file]
+    cookie_path = Path(cookie_file).expanduser() if cookie_file else None
+    if cookie_path and cookie_path.is_file():
+        cmd += ["--cookies", str(cookie_path)]
 
     emit(progress, "task_start", "download_audio", "使用 yt-dlp 下载音频")
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -341,10 +350,13 @@ def _bili_download_headers(
 
 
 def _load_bili_cookie_values(cookie_file: str) -> dict[str, str]:
-    if not cookie_file or not os.path.exists(cookie_file):
+    if not cookie_file:
+        return {}
+    path = Path(cookie_file).expanduser()
+    if not path.is_file():
         return {}
     values: dict[str, str] = {}
-    for raw_line in Path(cookie_file).read_text(encoding="utf-8", errors="ignore").splitlines():
+    for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         line = raw_line.strip()
         if not line:
             continue

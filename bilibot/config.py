@@ -3,22 +3,38 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 
 
+DEFAULT_LLM_MODEL_PROVIDERS = {
+    "grok-4.6": "grok",
+    "grok-4.5": "grok",
+    "dsv4flash": "deepseek",
+    "dsv4pro": "deepseek",
+}
+
+
 @dataclass(frozen=True)
 class Settings:
     llm_base_url: str = "http://localhost:5001/v1"
     llm_api_key: str = ""
-    llm_model: str = "deepseek-v4-pro"
+    llm_model: str = "grok-4.6"
+    llm_fallback_models: tuple[str, ...] = ("grok-4.5", "dsv4flash", "dsv4pro")
+    llm_model_providers: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LLM_MODEL_PROVIDERS))
+    llm_provider_base_urls: dict[str, str] = field(default_factory=dict)
+    llm_provider_api_keys: dict[str, str] = field(default_factory=dict)
     llm_timeout: float = 180.0
     llm_temperature: float | None = None
     llm_max_tokens: int | None = None
+    llm_max_retries: int = 2
+    llm_retry_base_delay: float = 2.0
+    llm_retry_max_delay: float = 20.0
     chunk_chars: int = 200000
+    summary_max_single_chunk_chars: int = 60000
 
     output_dir: Path = Path("data")
     language: str = "zh"
@@ -71,10 +87,21 @@ def load_settings(**overrides: Any) -> Settings:
         llm_base_url=os.getenv("LLM_BASE_URL", Settings.llm_base_url),
         llm_api_key=os.getenv("LLM_API_KEY", Settings.llm_api_key),
         llm_model=os.getenv("LLM_MODEL", Settings.llm_model),
+        llm_fallback_models=_env_list("LLM_FALLBACK_MODELS", Settings.llm_fallback_models),
+        llm_model_providers=_env_model_provider_map(),
+        llm_provider_base_urls=_env_provider_values("BASE_URL"),
+        llm_provider_api_keys=_env_provider_values("API_KEY"),
         llm_timeout=_env_float("LLM_TIMEOUT", Settings.llm_timeout),
         llm_temperature=_env_optional_float("LLM_TEMPERATURE"),
         llm_max_tokens=_env_optional_int("LLM_MAX_TOKENS"),
+        llm_max_retries=_env_int("LLM_MAX_RETRIES", Settings.llm_max_retries),
+        llm_retry_base_delay=_env_float("LLM_RETRY_BASE_DELAY", Settings.llm_retry_base_delay),
+        llm_retry_max_delay=_env_float("LLM_RETRY_MAX_DELAY", Settings.llm_retry_max_delay),
         chunk_chars=_env_int("CHUNK_CHARS", Settings.chunk_chars),
+        summary_max_single_chunk_chars=_env_int(
+            "SUMMARY_MAX_SINGLE_CHUNK_CHARS",
+            Settings.summary_max_single_chunk_chars,
+        ),
         output_dir=Path(os.getenv("BILIBOT_OUTPUT_DIR", str(Settings.output_dir))),
         language=os.getenv("TRANSCRIPT_LANGUAGE", Settings.language),
         asr_backend=os.getenv("ASR_BACKEND", Settings.asr_backend),
@@ -140,6 +167,20 @@ def load_settings(**overrides: Any) -> Settings:
     clean_overrides = {key: value for key, value in overrides.items() if value is not None}
     if "output_dir" in clean_overrides:
         clean_overrides["output_dir"] = Path(clean_overrides["output_dir"])
+    if "llm_fallback_models" in clean_overrides:
+        clean_overrides["llm_fallback_models"] = _parse_list(clean_overrides["llm_fallback_models"])
+    if "llm_model_providers" in clean_overrides:
+        clean_overrides["llm_model_providers"] = _normalize_model_provider_map(
+            _parse_mapping(clean_overrides["llm_model_providers"])
+        )
+    if "llm_provider_base_urls" in clean_overrides:
+        clean_overrides["llm_provider_base_urls"] = _normalize_provider_value_map(
+            _parse_mapping(clean_overrides["llm_provider_base_urls"])
+        )
+    if "llm_provider_api_keys" in clean_overrides:
+        clean_overrides["llm_provider_api_keys"] = _normalize_provider_value_map(
+            _parse_mapping(clean_overrides["llm_provider_api_keys"])
+        )
     return replace(settings, **clean_overrides)
 
 
@@ -169,6 +210,65 @@ def _env_optional_int(name: str) -> int | None:
     if raw in (None, ""):
         return None
     return int(raw)
+
+
+def _env_list(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw in (None, ""):
+        return default
+    return _parse_list(raw)
+
+
+def _parse_list(value: Any) -> tuple[str, ...]:
+    if isinstance(value, str):
+        parts = value.replace(",", " ").split()
+    else:
+        parts = [str(item) for item in value]
+    return tuple(part.strip() for part in parts if part.strip())
+
+
+def _env_model_provider_map() -> dict[str, str]:
+    return _normalize_model_provider_map(
+        _env_mapping("LLM_MODEL_PROVIDERS", DEFAULT_LLM_MODEL_PROVIDERS)
+    )
+
+
+def _env_provider_values(kind: str) -> dict[str, str]:
+    values = _normalize_provider_value_map(_env_mapping(f"LLM_PROVIDER_{kind}S", {}))
+    prefix = "LLM_PROVIDER_"
+    suffix = f"_{kind}"
+    for name, raw in os.environ.items():
+        if not name.startswith(prefix) or not name.endswith(suffix):
+            continue
+        provider = name[len(prefix) : -len(suffix)].lower()
+        value = raw.strip()
+        if provider and value:
+            values[provider] = value
+    return values
+
+
+def _env_mapping(name: str, default: dict[str, str]) -> dict[str, str]:
+    raw = os.getenv(name)
+    if raw in (None, ""):
+        return dict(default)
+    return {**default, **_parse_mapping(raw)}
+
+
+def _parse_mapping(value: Any) -> dict[str, str]:
+    if isinstance(value, dict):
+        items = value.items()
+    else:
+        tokens = str(value).replace(",", " ").replace(";", " ").split()
+        items = (token.split("=", 1) for token in tokens if "=" in token)
+    return {str(key).strip(): str(raw).strip() for key, raw in items if str(key).strip() and str(raw).strip()}
+
+
+def _normalize_model_provider_map(values: dict[str, str]) -> dict[str, str]:
+    return {model.strip(): provider.strip().lower() for model, provider in values.items() if model.strip()}
+
+
+def _normalize_provider_value_map(values: dict[str, str]) -> dict[str, str]:
+    return {provider.strip().lower(): value.strip() for provider, value in values.items() if provider.strip()}
 
 
 def _env_bool(name: str, default: bool) -> bool:

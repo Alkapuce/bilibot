@@ -9,22 +9,26 @@ from .models import Transcript, format_timestamp
 from .progress import ProgressCallback, emit
 
 
-SYSTEM_PROMPT = """你是一个顶级的 CS231n 课程笔记专家。你的任务是根据视频字幕生成深度结构化中文笔记。
+SYSTEM_PROMPT = """你是一个擅长把视频内容整理成易读摘要的中文笔记助手。
 
-**核心要求**：
-- 逐段精读，不要跳过大段内容。每个概念都要覆盖。
-- 时间线必须按课程推进顺序列出每个知识点出现的位置（精确到字幕段的时间戳）。
-- 关键观点必须是课程中讲师明确阐述的论点，每条附上原文或近原文引用。
-- 术语和概念必须列出课程中出现的每个专业术语，给出定义、使用场景、与其它概念的关联。
-- 可行动建议必须是课程中提到的实操建议（作业要求、编程技巧、论文阅读、实验设置等）。
-- 仍需核实：标记课程中讲师不确定、带条件、或需要查证补充的内容。
-- 禁止写“字幕中未提供”这种偷懒表述——你应该从字幕中提取所有可用信息。
-- 笔记应该丰富到能替代看视频，让读者只看笔记就能理解课程核心内容。
-- 全中文输出，但专业术语保留英文原名并附中文解释。
+你的目标不是套固定模板，而是让读者轻松、快速、完整地掌握视频信息。
+
+核心原则：
+- 先判断视频类型和叙事结构，再选择最适合阅读的 Markdown 组织方式。
+- 保留视频里的重要事实、观点、步骤、例子、结论和上下文，不机械复述字幕。
+- 根据内容自然分组：教程可按步骤，评测可按维度，访谈可按话题，新闻可按事件脉络，长讲解可按主题层级。
+- 用更容易扫读的表达：短段落、清晰小标题、要点列表、必要时表格。
+- 避免大段文字墙：每个主要部分先给一句结论，再用少量短段落或要点展开。
+- 输出是中等详细摘要，不是完整讲义；压缩枝节，保留主线和高价值细节。
+- 控制标题层级：优先使用 4-8 个二级标题；三级标题只在内容确实复杂时使用，避免每个小点都升成标题。
+- 时间戳只在有助于定位关键片段时使用；不要为了凑格式强行做完整时间线。
+- 可以概括和重组，但不要编造字幕中没有的信息，不要加入外部知识当作视频内容。
+- 全中文输出；必要的英文术语可保留原文，并给出自然解释。
 """
 
 
 def split_text(text: str, max_chars: int) -> list[str]:
+    max_chars = max(1, int(max_chars))
     if len(text) <= max_chars:
         return [text]
 
@@ -64,19 +68,21 @@ def summarize_video(
     progress: ProgressCallback | None = None,
 ) -> str:
     llm = LLMClient(settings)
+    model_label = llm.model_sequence_label()
     transcript_text = transcript.text.strip()
     if not transcript_text:
         return render_basic_notes(info, transcript, "未获取到可用于总结的字幕或转写文本。")
 
-    chunks = split_text(transcript_text, settings.chunk_chars)
+    chunk_chars = effective_summary_chunk_chars(settings)
+    chunks = split_text(transcript_text, chunk_chars)
     emit(
         progress,
         "log",
         "llm_summarize",
-        f"字幕共 {len(transcript_text)} 字符，分为 {len(chunks)} 块，使用模型 {settings.llm_model}",
+        f"字幕共 {len(transcript_text)} 字符，按 {chunk_chars} 字符上限分为 {len(chunks)} 块，模型链路 {model_label}",
     )
     if len(chunks) == 1:
-        emit(progress, "task_start", "llm_summarize", f"生成笔记：{settings.llm_model}", total=1)
+        emit(progress, "task_start", "llm_summarize", f"生成笔记：{model_label}", total=1)
         emit(progress, "log", "llm_summarize", f"第 1 块，{len(chunks[0])} 字符，正在调用 LLM...")
         notes = _summarize_single(llm, info, transcript, chunks[0], progress=progress)
         emit(progress, "task_done", "llm_summarize", "笔记生成完成")
@@ -87,7 +93,7 @@ def summarize_video(
         progress,
         "task_start",
         "llm_summarize",
-        f"分块生成笔记：{settings.llm_model}",
+        f"分块生成笔记：{model_label}",
         total=len(chunks) + 1,
         unit="chunk",
     )
@@ -114,6 +120,14 @@ def summarize_video(
     notes = _merge_notes(llm, info, transcript, partial_notes, progress=progress)
     emit(progress, "task_done", "llm_summarize", "笔记生成完成")
     return notes
+
+
+def effective_summary_chunk_chars(settings: Settings) -> int:
+    requested = max(1, int(settings.chunk_chars))
+    cap = int(settings.summary_max_single_chunk_chars)
+    if cap > 0:
+        return min(requested, cap)
+    return requested
 
 
 def render_basic_notes(info: VideoInfo, transcript: Transcript, reason: str = "") -> str:
@@ -167,48 +181,26 @@ def _summarize_single(
     *,
     progress: ProgressCallback | None = None,
 ) -> str:
-    prompt = f"""请根据下面的视频字幕生成一份深度中文 Markdown 笔记。这是 CS231n 课程的正式学习笔记，不是泛泛的摘要。
+    prompt = f"""请根据下面的视频字幕生成一份易读、信息完整的中文 Markdown 摘要笔记。
 
-**输出结构必须严格包含以下章节**：
+请先在心里判断视频类型、内容密度和叙事方式，然后自行设计输出结构。不要套用固定章节；只使用真正有助于阅读的标题和列表。
 
-# 第X讲：{info.title or info.bvid}
-## 视频信息
-（BV号、讲师、时长等基本信息）
+建议的阅读体验：
+- 开头用 3-6 句话给出“这个视频讲了什么、最重要的信息是什么、适合谁读”。
+- 正文按视频自身逻辑重组，而不是逐句复述字幕。
+- 对复杂内容使用分组小标题；对步骤、对比、参数、优缺点等内容可用列表或表格。
+- 对重要结论、关键数字、具体方法、案例细节要尽量保留。
+- 每个主要部分建议先写 1 句概括，再用 3-6 个要点或短段落展开；避免连续大段叙述。
+- 如果视频里有明显的段落转折或关键片段，可以附少量时间戳帮助定位。
+- 不要强制输出术语表、行动建议、核实清单、完整时间线或固定观点列表。
+- 不要写“字幕中未提供”之类的占位话；没有的信息直接不写。
+- 原始字幕很短时保持简洁；信息量很大时可以充分展开，但不要灌水。
 
-## 课程大纲（本讲内容地图）
-用 5-10 个要点列出本讲覆盖的所有主题，形成内容地图。
-
-## 时间线（按课程推进）
-按时间顺序列出每个知识点出现的位置。格式：`[时间段] 知识点：具体内容`
-- 不要跳段，覆盖整节课
-- 每 5-10 分钟至少一个时间点
-
-## 关键观点（讲师核心论点）
-每条观点需包含：
-- **论点**：讲师明确表达的观点
-- **原文引用**：字幕中接近原文的引用
-- **论证逻辑**：讲师如何论证该观点
-
-## 术语和概念（完整词汇表）
-每个术语必须包含：
-- **英文名** (中文译名)：定义
-- 使用场景
-- 与其它概念的关联（如：X 是 Y 的基础，与 Z 对比...）
-
-## 可行动建议
-- 课程中提到的作业、实验、编程练习
-- 推荐阅读的论文或资料
-- 学习路径建议
-
-## 仍需核实
-- 讲师含糊或不确定的内容
-- 需要查阅外部资料补充的部分
-
-**警告**：
-- 禁止简短敷衍。每个章节至少 5 条以上内容。
-- 禁止跳过中间时间段。
-- 禁止写"字幕中未提供"而不尝试提取。
-- 笔记应达到 2000 字以上。
+篇幅和层级控制：
+- 默认写成中等长度摘要：约 2500-5000 个中文字符；高密度教程或长视频最多约 7000 字符。
+- 优先使用 4-8 个二级标题；三级标题要少用，只有大段内容需要再分组时才使用。
+- 避免标题过碎、段落过短、每个事实单独成节；相关事实应合并成一组。
+- 不要为了“完整”把所有细节平铺出来；优先保证读者能轻松读完并掌握全貌。
 
 视频信息：
 {_video_context(info, transcript)}
@@ -236,11 +228,13 @@ def _summarize_chunk(
     *,
     progress: ProgressCallback | None = None,
 ) -> str:
-    prompt = f"""这是同一个视频字幕的第 {index}/{total} 段。请先生成分段笔记，供后续合并。
+    prompt = f"""这是同一个视频字幕的第 {index}/{total} 段。请先整理一份分段摘要，供后续合并成完整笔记。
 
 要求：
-- 提取本段出现的主题、事实、论点、例子、术语。
-- 保留本段重要时间点。
+- 提取本段出现的重要信息、事实、观点、例子、步骤、结论和上下文。
+- 按本段内容自然分组，不要套固定模板。
+- 记录有助于定位的少量关键时间点，但不要强制做完整时间线。
+- 分段摘要要为最终压缩服务，保留主线和高价值细节，略去重复铺垫。
 - 不要写最终总标题。
 
 视频信息：
@@ -270,23 +264,22 @@ def _merge_notes(
     joined = "\n\n---\n\n".join(
         f"分段笔记 {index}：\n{note}" for index, note in enumerate(partial_notes, start=1)
     )
-    prompt = f"""请将下面的分段笔记合并成一份完整中文 Markdown 视频笔记。
+    prompt = f"""请将下面的分段摘要合并成一份完整、易读的中文 Markdown 视频摘要笔记。
 
 要求：
-- 去重并重组为连贯结构，不要简单拼接。
-- 保留关键时间点。
-- 如果分段笔记之间存在矛盾，放到"仍需核实"。
+- 去重、重排并压缩重复内容，不要简单拼接分段结果。
+- 先判断整支视频的类型和内容架构，再设计最适合阅读的结构。
+- 开头保留一个简短总览，帮助读者快速知道视频核心信息。
+- 正文按主题、事件脉络、步骤、对比维度或问答话题自然组织。
+- 只在有定位价值时保留少量关键时间点。
+- 不要强制输出术语表、行动建议、核实清单、完整时间线或固定观点列表。
+- 不要加入分段摘要里没有的内容。
+- 最终输出要比各分段之和明显更短：压缩重复例子、相近论点和枝节铺垫。
+- 默认目标约 2500-5000 个中文字符；高密度教程或长视频最多约 7000 字符。
+- 优先使用 4-8 个二级标题，三级标题少用；不要把每个小事实单独做标题。
 
-输出结构：
+标题：
 # {info.title or info.bvid}
-## 视频信息
-## 一句话总结
-## 核心内容
-## 时间线
-## 关键观点
-## 术语和概念
-## 可行动建议
-## 仍需核实
 
 视频信息：
 {_video_context(info, transcript)}
