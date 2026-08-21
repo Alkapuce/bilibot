@@ -17,7 +17,6 @@ DEFAULT_LLM_MODEL_PROVIDERS = {
     "dsv4pro": "deepseek",
 }
 
-
 @dataclass(frozen=True)
 class Settings:
     llm_base_url: str = "http://localhost:5001/v1"
@@ -27,6 +26,8 @@ class Settings:
     llm_model_providers: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LLM_MODEL_PROVIDERS))
     llm_provider_base_urls: dict[str, str] = field(default_factory=dict)
     llm_provider_api_keys: dict[str, str] = field(default_factory=dict)
+    llm_wire_api: str = "chat_completions"
+    llm_provider_wire_apis: dict[str, str] = field(default_factory=dict)
     llm_timeout: float = 180.0
     llm_temperature: float | None = None
     llm_max_tokens: int | None = None
@@ -91,6 +92,8 @@ def load_settings(**overrides: Any) -> Settings:
         llm_model_providers=_env_model_provider_map(),
         llm_provider_base_urls=_env_provider_values("BASE_URL"),
         llm_provider_api_keys=_env_provider_values("API_KEY"),
+        llm_wire_api=os.getenv("LLM_WIRE_API", Settings.llm_wire_api),
+        llm_provider_wire_apis=_env_provider_values("WIRE_API"),
         llm_timeout=_env_float("LLM_TIMEOUT", Settings.llm_timeout),
         llm_temperature=_env_optional_float("LLM_TEMPERATURE"),
         llm_max_tokens=_env_optional_int("LLM_MAX_TOKENS"),
@@ -181,6 +184,10 @@ def load_settings(**overrides: Any) -> Settings:
         clean_overrides["llm_provider_api_keys"] = _normalize_provider_value_map(
             _parse_mapping(clean_overrides["llm_provider_api_keys"])
         )
+    if "llm_provider_wire_apis" in clean_overrides:
+        clean_overrides["llm_provider_wire_apis"] = _normalize_provider_value_map(
+            _parse_mapping(clean_overrides["llm_provider_wire_apis"])
+        )
     return replace(settings, **clean_overrides)
 
 
@@ -214,8 +221,10 @@ def _env_optional_int(name: str) -> int | None:
 
 def _env_list(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     raw = os.getenv(name)
-    if raw in (None, ""):
+    if raw is None:
         return default
+    if raw == "":
+        return ()
     return _parse_list(raw)
 
 
@@ -233,8 +242,8 @@ def _env_model_provider_map() -> dict[str, str]:
     )
 
 
-def _env_provider_values(kind: str) -> dict[str, str]:
-    values = _normalize_provider_value_map(_env_mapping(f"LLM_PROVIDER_{kind}S", {}))
+def _env_provider_values(kind: str, default: dict[str, str] | None = None) -> dict[str, str]:
+    values = _normalize_provider_value_map(_env_mapping(f"LLM_PROVIDER_{kind}S", default or {}))
     prefix = "LLM_PROVIDER_"
     suffix = f"_{kind}"
     for name, raw in os.environ.items():

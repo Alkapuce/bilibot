@@ -130,6 +130,20 @@ class _OpenAIFactory:
         return client
 
 
+class _Responses:
+    def __init__(self):
+        self.calls: list[dict[str, object]] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return type("Response", (), {"output_text": "responses ok"})()
+
+
+class _ResponsesClient:
+    def __init__(self):
+        self.responses = _Responses()
+
+
 class LLMClientRetryTests(unittest.TestCase):
     def test_env_parses_fallback_model_chain(self) -> None:
         with patch.dict(
@@ -223,6 +237,33 @@ class LLMClientRetryTests(unittest.TestCase):
         self.assertTrue(any(event.kind == "log" and "重试" in event.message for event in events))
         self.assertTrue(any(event.kind == "task_update" and "LLM 生成完成" in event.message for event in events))
         self.assertTrue(all(event.advance is None for event in events if event.kind == "task_update"))
+
+    def test_responses_api_uses_input_and_max_output_tokens(self) -> None:
+        llm = LLMClient(
+            Settings(
+                llm_api_key="test-key",
+                llm_model="gpt-5.5",
+                llm_max_tokens=321,
+                llm_temperature=0.2,
+                llm_model_providers={"gpt-5.5": "codex"},
+                llm_provider_wire_apis={"codex": "responses"},
+            )
+        )
+        fake_client = _ResponsesClient()
+        llm.client = fake_client
+
+        result = llm.complete([{"role": "user", "content": "hi"}])
+
+        self.assertEqual(result, "responses ok")
+        self.assertEqual(llm.last_model, "gpt-5.5")
+        self.assertEqual(
+            fake_client.responses.calls,
+            [{
+                "model": "gpt-5.5",
+                "input": [{"role": "user", "content": "hi"}],
+                "max_output_tokens": 321,
+            }],
+        )
 
 
 if __name__ == "__main__":

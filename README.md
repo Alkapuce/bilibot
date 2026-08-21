@@ -39,17 +39,15 @@ uv run bilibot 1xxxxxxxxx
 Copy `.env.example` to `.env` and fill in your LLM endpoints:
 
 ```env
-# Default endpoint/key. DeepSeek fallback models use these values.
-LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_API_KEY=your-deepseek-key
-LLM_MODEL=grok-4.6
-LLM_FALLBACK_MODELS=grok-4.5,dsv4flash,dsv4pro
-LLM_MODEL_PROVIDERS=grok-4.6=grok,grok-4.5=grok,dsv4flash=deepseek,dsv4pro=deepseek
-LLM_PROVIDER_GROK_BASE_URL=https://your-grok-endpoint/v1
-LLM_PROVIDER_GROK_API_KEY=your-grok-key
+# GPT-5.5 uses a provider exposing the OpenAI Responses API.
+# Keep this endpoint/key in the local, ignored .env file.
+LLM_MODEL=gpt-5.5
+LLM_FALLBACK_MODELS=
+LLM_MODEL_PROVIDERS=gpt-5.5=responses_provider
+LLM_PROVIDER_RESPONSES_PROVIDER_WIRE_API=responses
 ```
 
-`LLM_MODEL` is the primary model, and `LLM_FALLBACK_MODELS` is an ordered comma- or space-separated fallback chain. Models listed in `LLM_MODEL_PROVIDERS` use provider-specific keys such as `LLM_PROVIDER_GROK_BASE_URL` / `LLM_PROVIDER_GROK_API_KEY`; models without provider overrides fall back to `LLM_BASE_URL` / `LLM_API_KEY`.
+`LLM_MODEL` is the primary model, and `LLM_FALLBACK_MODELS` is an ordered comma- or space-separated fallback chain. Provider-specific endpoint/key values are read from `LLM_PROVIDER_<NAME>_BASE_URL` and `LLM_PROVIDER_<NAME>_API_KEY`; keep real values in the ignored `.env` file. Set the selected provider's `LLM_PROVIDER_<NAME>_WIRE_API=responses` for a GPT-5.5-compatible Responses provider. Other providers continue to use Chat Completions by default.
 
 ### ASR Backends
 
@@ -172,17 +170,15 @@ uv run bilibot 1xxxxxxxxx
 复制 `.env.example` 为 `.env`，填入 LLM 接口地址和密钥：
 
 ```env
-# 默认接口/密钥。DeepSeek fallback 模型使用这里的值。
-LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_API_KEY=your-deepseek-key
-LLM_MODEL=grok-4.6
-LLM_FALLBACK_MODELS=grok-4.5,dsv4flash,dsv4pro
-LLM_MODEL_PROVIDERS=grok-4.6=grok,grok-4.5=grok,dsv4flash=deepseek,dsv4pro=deepseek
-LLM_PROVIDER_GROK_BASE_URL=https://your-grok-endpoint/v1
-LLM_PROVIDER_GROK_API_KEY=your-grok-key
+# GPT-5.5 使用支持 OpenAI Responses API 的 provider。
+# 真实 endpoint/key 放在不会提交的 .env 中。
+LLM_MODEL=gpt-5.5
+LLM_FALLBACK_MODELS=
+LLM_MODEL_PROVIDERS=gpt-5.5=responses_provider
+LLM_PROVIDER_RESPONSES_PROVIDER_WIRE_API=responses
 ```
 
-`LLM_MODEL` 是主模型，`LLM_FALLBACK_MODELS` 是按顺序尝试的 fallback 链路，支持逗号或空格分隔。`LLM_MODEL_PROVIDERS` 里的模型会使用对应 provider 的专属配置，例如 Grok 走 `LLM_PROVIDER_GROK_BASE_URL` / `LLM_PROVIDER_GROK_API_KEY`；没有专属配置的模型会回退使用 `LLM_BASE_URL` / `LLM_API_KEY`。
+`LLM_MODEL` 是主模型，`LLM_FALLBACK_MODELS` 是按顺序尝试的 fallback 链路，支持逗号或空格分隔。provider 的 endpoint/key 通过 `LLM_PROVIDER_<NAME>_BASE_URL` / `LLM_PROVIDER_<NAME>_API_KEY` 配置，真实值应放在不会提交的 `.env` 中。GPT-5.5 所选 provider 必须设置对应的 `LLM_PROVIDER_<NAME>_WIRE_API=responses`，其他 provider 默认继续走 Chat Completions。
 
 ### ASR 后端
 

@@ -145,19 +145,29 @@ class LLMClient:
         stream: bool = False,
     ) -> str:
         kwargs: dict[str, Any] = {}
-        if self.temperature is not None:
-            kwargs["temperature"] = self.temperature
-        if self.max_tokens is not None:
-            kwargs["max_tokens"] = self.max_tokens
+        wire_api = self._wire_api_for_model(model)
+        if wire_api == "responses":
+            if self.max_tokens is not None:
+                kwargs["max_output_tokens"] = self.max_tokens
+        else:
+            if self.temperature is not None:
+                kwargs["temperature"] = self.temperature
+            if self.max_tokens is not None:
+                kwargs["max_tokens"] = self.max_tokens
         if self.extra_body is not None:
             kwargs["extra_body"] = self.extra_body
+
+        client = self._client_for_model(model)
+        if wire_api == "responses":
+            return self._complete_responses(
+                client, messages, model=model, kwargs=kwargs, task_name=task_name, progress=progress, stream=stream
+            )
 
         if stream:
             kwargs["stream"] = True
             chars = 0
             reported = 0
             pieces: list[str] = []
-            client = self._client_for_model(model)
             stream = client.chat.completions.create(
                 model=model,
                 messages=list(messages),
@@ -188,13 +198,50 @@ class LLMClient:
             self.last_model = model
             return content
 
-        client = self._client_for_model(model)
         response = client.chat.completions.create(
             model=model,
             messages=list(messages),
             **kwargs,
         )
         content = response.choices[0].message.content
+        self.last_model = model
+        return content.strip() if content else ""
+
+    def _complete_responses(
+        self,
+        client: Any,
+        messages: Sequence[Message],
+        *,
+        model: str,
+        kwargs: dict[str, Any],
+        task_name: str,
+        progress: ProgressCallback | None,
+        stream: bool,
+    ) -> str:
+        if stream:
+            kwargs["stream"] = True
+            pieces: list[str] = []
+            chars = 0
+            reported = 0
+            response_stream = client.responses.create(model=model, input=list(messages), **kwargs)
+            for event in response_stream:
+                delta = getattr(event, "delta", None)
+                if getattr(event, "type", None) == "response.output_text.delta" and delta:
+                    pieces.append(delta)
+                    chars += len(delta)
+                    while chars - reported >= 150:
+                        reported += 150
+                        emit(progress, "task_update", task_name, f"LLM 生成中 ({chars} 字符)")
+            if chars - reported:
+                emit(progress, "task_update", task_name, f"LLM 生成完成 ({chars} 字符)")
+            content = "".join(pieces).strip()
+            self.last_model = model
+            return content
+
+        response = client.responses.create(model=model, input=list(messages), **kwargs)
+        content = getattr(response, "output_text", None)
+        if not content:
+            content = _response_output_text(response)
         self.last_model = model
         return content.strip() if content else ""
 
@@ -236,6 +283,10 @@ class LLMClient:
             )
         return self.settings.llm_base_url, self.settings.llm_api_key
 
+    def _wire_api_for_model(self, model: str) -> str:
+        provider = self.settings.llm_model_providers.get(model.strip(), "").lower()
+        return (self.settings.llm_provider_wire_apis.get(provider) or self.settings.llm_wire_api).strip().lower()
+
 
 def _is_retryable_error(exc: Exception) -> bool:
     if isinstance(exc, (APIConnectionError, APITimeoutError, InternalServerError, RateLimitError)):
@@ -269,3 +320,13 @@ def _error_summary(exc: Exception, max_chars: int = 240) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 1].rstrip() + "…"
+
+
+def _response_output_text(response: Any) -> str:
+    pieces: list[str] = []
+    for item in getattr(response, "output", None) or []:
+        for content in getattr(item, "content", None) or []:
+            text = getattr(content, "text", None)
+            if text:
+                pieces.append(text)
+    return "".join(pieces)
