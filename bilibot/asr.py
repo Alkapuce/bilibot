@@ -33,10 +33,10 @@ QWEN3_0_6B_MIN_VRAM_MB = 4000
 def resolve_backend(settings: Settings, gpu_mb: int = 0) -> str:
     if settings.asr_backend not in ("auto", ""):
         return settings.asr_backend
-    if _gguf_available(settings):
-        return "gguf"
     if gpu_mb >= QWEN3_1_7B_MIN_VRAM_MB:
         return "qwen3"
+    if _gguf_available(settings):
+        return "gguf"
     return "whisper"
 
 
