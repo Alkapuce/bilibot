@@ -53,26 +53,38 @@ LLM_PROVIDER_RESPONSES_PROVIDER_WIRE_API=responses
 
 | Priority | Backend | Requirement | Size |
 |----------|---------|-------------|------|
-| 1 | **gguf** (llama.cpp) | Recent `llama-mtmd-cli` + GGUF model/mmproj | ~2.4 GB |
-| 2 | **qwen3** (HuggingFace BF16) | ≥6 GB VRAM | ~3.4 GB |
-| 3 | **whisper** (faster-whisper) | Always available | 0.15–3 GB |
+| 1 | **qwen3** (HuggingFace BF16) | ≥6 GB VRAM + safetensors model | ~4.4 GB |
+| 2 | **whisper** (faster-whisper) | Always available | 0.15–3 GB |
+| 3 | **gguf** (llama.cpp) | Optional legacy path: `llama-mtmd-cli` + GGUF/mmproj | ~2.4 GB |
 
-#### GGUF (recommended)
+#### Qwen3 BF16 (recommended)
+
+```bash
+uv sync --extra qwen3
+huggingface-cli download Qwen/Qwen3-ASR-1.7B --local-dir .models/Qwen3-ASR-1.7B
+uv run bilibot summarize BVxxxx --asr-backend qwen3 --asr-model .models/Qwen3-ASR-1.7B
+uv run qwen3-asr ./meeting.m4a --asr-model .models/Qwen3-ASR-1.7B
+```
+
+To return word/character timestamps, download `Qwen/Qwen3-ForcedAligner-0.6B` and pass both checkpoints:
+
+```bash
+modelscope download --model Qwen/Qwen3-ForcedAligner-0.6B --local_dir .models/Qwen3-ForcedAligner-0.6B
+uv run qwen3-asr ./meeting.m4a \\
+  --asr-model .models/Qwen3-ASR-1.7B \\
+  --forced-aligner-model .models/Qwen3-ForcedAligner-0.6B \\
+  --timestamps
+```
+
+The normal transcript artifacts remain available. When timestamps are returned, an additional `timestamps.json` is written next to `transcript.json`; each item has `text`, `start`, and `end` in seconds. `--timestamps` can also discover `.models/Qwen3-ForcedAligner-0.6B` from the project directory. Forced alignment supports audio chunks up to five minutes; longer files are split and timestamp offsets are restored.
+
+#### GGUF (optional legacy path)
 
 ```bash
 uv sync --extra gguf
 export ASR_GGUF_MODEL_DIR=/path/to/Qwen3-ASR-1.7B-GGUF
 export ASR_GGUF_CLI=/path/to/llama.cpp/build/bin/llama-mtmd-cli
-uv run bilibot summarize BVxxxx
-```
-
-Download the GGUF model from [HuggingFace](https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF). Use a recent llama.cpp build; older distro packages may not support the Qwen3 audio projector.
-
-#### Qwen3 BF16
-
-```bash
-uv sync --extra qwen3
-uv run bilibot summarize BVxxxx --asr-backend qwen3
+uv run bilibot summarize BVxxxx --asr-backend gguf
 ```
 
 #### Whisper
@@ -94,6 +106,8 @@ uv run bilibot info <url> --json                # Metadata as JSON
 uv run bilibot download <url>                   # Download video
 uv run bilibot download <url> --json            # Output file path as JSON
 uv run bilibot asr ./meeting.m4a                # Transcribe local audio/video
+uv run qwen3-asr ./meeting.m4a                  # Transcribe with local Qwen3-ASR
+uv run qwen3-asr ./meeting.m4a --timestamps    # Transcribe with word/character timestamps
 uv run bilibot asr ./meeting.m4a --json         # Output artifact paths as JSON
 uv run bilibot gen-notes <bvid>                 # Regenerate notes from cache
 uv run bilibot doctor                           # System check
@@ -111,7 +125,7 @@ All files go to `data/{bvid}/`:
 | `{title}_字幕.txt` | Plain-text transcript |
 | `{title}_笔记.md` | LLM-generated notes |
 
-Local audio transcription writes to `data/local_asr/{audio-stem}/` with `transcript.json`, `transcript.md`, and `captions.txt`.
+Local audio transcription writes to `data/local_asr/{audio-stem}/` with `transcript.json`, `transcript.md`, and `captions.txt`. With `--timestamps`, it also writes `timestamps.json` and stores the same records under `time_stamps` in `transcript.json`.
 
 ### Requirements
 
@@ -184,26 +198,38 @@ LLM_PROVIDER_RESPONSES_PROVIDER_WIRE_API=responses
 
 | 优先级 | 后端 | 条件 | 模型大小 |
 |--------|------|------|----------|
-| 1 | **gguf** (llama.cpp) | 新版 `llama-mtmd-cli` + GGUF 模型/mmproj | ~2.4 GB |
-| 2 | **qwen3** (HuggingFace BF16) | ≥6 GB 显存 | ~3.4 GB |
-| 3 | **whisper** (faster-whisper) | 始终可用 | 0.15–3 GB |
+| 1 | **qwen3** (HuggingFace BF16) | ≥6 GB 显存 + safetensors 模型 | ~4.4 GB |
+| 2 | **whisper** (faster-whisper) | 始终可用 | 0.15–3 GB |
+| 3 | **gguf** (llama.cpp) | 可选旧路径：`llama-mtmd-cli` + GGUF/mmproj | ~2.4 GB |
 
-#### GGUF 后端（推荐）
+#### Qwen3 BF16 后端（推荐）
+
+```bash
+uv sync --extra qwen3
+huggingface-cli download Qwen/Qwen3-ASR-1.7B --local-dir .models/Qwen3-ASR-1.7B
+uv run bilibot summarize BVxxxx --asr-backend qwen3 --asr-model .models/Qwen3-ASR-1.7B
+uv run qwen3-asr ./meeting.m4a --asr-model .models/Qwen3-ASR-1.7B
+```
+
+启用 Qwen3 ForcedAligner 后，CLI 会额外输出词级或字级时间戳：
+
+```bash
+modelscope download --model Qwen/Qwen3-ForcedAligner-0.6B --local_dir .models/Qwen3-ForcedAligner-0.6B
+uv run qwen3-asr ./meeting.m4a \\
+  --asr-model .models/Qwen3-ASR-1.7B \\
+  --forced-aligner-model .models/Qwen3-ForcedAligner-0.6B \\
+  --timestamps
+```
+
+启用后，`data/local_asr/{音频文件名}/` 下会多出 `timestamps.json`，每项包含 `text`、`start`、`end`，时间单位为秒；`transcript.json` 的 `time_stamps` 字段也保存同样内容。只传 `--timestamps` 时，CLI 会优先查找项目目录下的 `.models/Qwen3-ForcedAligner-0.6B`。超过五分钟的音频会分片识别，并自动恢复为原始音频时间轴。
+
+#### GGUF 后端（可选旧路径）
 
 ```bash
 uv sync --extra gguf
 export ASR_GGUF_MODEL_DIR=/path/to/Qwen3-ASR-1.7B-GGUF
 export ASR_GGUF_CLI=/path/to/llama.cpp/build/bin/llama-mtmd-cli
-uv run bilibot summarize BVxxxx
-```
-
-模型从 [HuggingFace](https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF) 下载。请使用较新的 llama.cpp；较旧的发行版包可能不支持 Qwen3 audio projector。
-
-#### Qwen3 BF16 后端
-
-```bash
-uv sync --extra qwen3
-uv run bilibot summarize BVxxxx --asr-backend qwen3
+uv run bilibot summarize BVxxxx --asr-backend gguf
 ```
 
 #### Whisper 后端
@@ -225,6 +251,8 @@ uv run bilibot info <url> --json                # 元数据 JSON 输出
 uv run bilibot download <url>                   # 下载视频
 uv run bilibot download <url> --json            # 输出文件路径 JSON
 uv run bilibot asr ./meeting.m4a                # 转写本地音频/视频
+uv run qwen3-asr ./meeting.m4a                  # 使用本地 Qwen3-ASR 转写
+uv run qwen3-asr ./meeting.m4a --timestamps    # 使用 ForcedAligner 输出词/字级时间戳
 uv run bilibot asr ./meeting.m4a --json         # 输出产物路径 JSON
 uv run bilibot gen-notes <bvid>                 # 从已有字幕重新生成笔记
 uv run bilibot doctor                           # 查看本机环境
@@ -242,7 +270,7 @@ uv run bilibot doctor --json                    # 本机环境 JSON 输出
 | `{标题}_字幕.txt` | 纯文本字幕 |
 | `{标题}_笔记.md` | LLM 生成的结构化笔记 |
 
-本地音频转写写入 `data/local_asr/{音频文件名}/`，包含 `transcript.json`、`transcript.md` 和 `captions.txt`。
+本地音频转写写入 `data/local_asr/{音频文件名}/`，包含 `transcript.json`、`transcript.md` 和 `captions.txt`。启用 `--timestamps` 后还会生成 `timestamps.json`，`transcript.json` 中也会保存 `time_stamps` 字段。
 
 ### 环境要求
 
