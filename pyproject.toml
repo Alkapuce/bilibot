@@ -22,6 +22,7 @@ gguf = ["numpy", "soundfile", "scipy", "gguf", "onnxruntime", "srt"]
 
 [project.scripts]
 bilibot = "bilibot.cli:main"
+qwen3-asr = "bilibot.qwen_asr_cli:main"
 
 [build-system]
 requires = ["hatchling"]

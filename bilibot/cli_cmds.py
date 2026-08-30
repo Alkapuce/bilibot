@@ -356,6 +356,8 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         asr_backend=args.asr_backend,
         asr_preset=args.asr_preset,
         asr_model=args.asr_model,
+        asr_forced_aligner_model=args.asr_forced_aligner_model,
+        asr_return_time_stamps=args.asr_return_time_stamps,
         asr_device=args.asr_device,
         asr_compute_type=args.asr_compute_type,
         asr_task=args.asr_task,

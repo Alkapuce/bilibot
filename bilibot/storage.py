@@ -50,6 +50,16 @@ def save_local_transcript_artifacts(
     _write_json(paths["transcript_json"], transcript.to_dict())
     paths["transcript_md"].write_text(transcript.to_markdown(), encoding="utf-8")
     paths["captions_txt"].write_text(transcript.to_captions(), encoding="utf-8")
+    if transcript.time_stamps:
+        paths["timestamps_json"] = root / "timestamps.json"
+        _write_json(
+            paths["timestamps_json"],
+            {
+                "source": transcript.source,
+                "language": transcript.language,
+                "timestamps": transcript.time_stamps,
+            },
+        )
     return paths
 
 

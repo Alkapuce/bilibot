@@ -3,13 +3,16 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from bilibot.cli import _normalize_argv, build_parser, main
+from bilibot.qwen_asr_cli import main as qwen3_asr_main
 from bilibot.downloader import _canonical_bilibili_url
 from bilibot.gguf_asr_backend import _clean_mtmd_output, _contains_any_file, _find_files
 from bilibot.models import Transcript, TranscriptSegment
-from bilibot.qwen_asr_backend import _resolve_language
+from bilibot.config import Settings
+from bilibot.qwen_asr_backend import _normalize_time_stamps, _resolve_forced_aligner_model, _resolve_language
 from bilibot.storage import save_local_transcript_artifacts
 
 
@@ -55,6 +58,27 @@ class LocalAsrCliTests(unittest.TestCase):
         self.assertEqual(args.asr_backend, "gguf")
         self.assertEqual(args.asr_gguf_model_dir, ".models/Qwen3-ASR-1.7B-GGUF")
 
+    def test_asr_command_accepts_qwen_forced_aligner_options(self) -> None:
+        parser = build_parser()
+
+        args = parser.parse_args(
+            [
+                "asr",
+                "meeting.wav",
+                "--asr-backend",
+                "qwen3",
+                "--forced-aligner-model",
+                ".models/Qwen3-ForcedAligner-0.6B",
+                "--timestamps",
+            ]
+        )
+
+        self.assertEqual(args.asr_forced_aligner_model, ".models/Qwen3-ForcedAligner-0.6B")
+        self.assertTrue(args.asr_return_time_stamps)
+
+        disabled = parser.parse_args(["asr", "meeting.wav", "--no-timestamps"])
+        self.assertFalse(disabled.asr_return_time_stamps)
+
     def test_asr_command_is_not_normalized_to_summarize(self) -> None:
         self.assertEqual(_normalize_argv(["asr", "meeting.m4a"]), ["asr", "meeting.m4a"])
 
@@ -75,6 +99,27 @@ class LocalAsrCliTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             transcribe.assert_called_once()
             self.assertTrue((Path(tmpdir) / "local_asr" / "meeting" / "transcript.json").is_file())
+
+    def test_qwen_timestamps_are_saved_as_a_separate_artifact(self) -> None:
+        transcript = Transcript(
+            source="qwen3:/model",
+            language="English",
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="hello")],
+            time_stamps=[{"text": "hello", "start": 0.2, "end": 0.8}],
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            paths = save_local_transcript_artifacts(Path(tmpdir), Path("meeting.wav"), transcript)
+
+            self.assertTrue(paths["timestamps_json"].is_file())
+            self.assertIn('"start": 0.2', paths["timestamps_json"].read_text(encoding="utf-8"))
+
+    def test_qwen3_asr_entrypoint_forces_qwen3_backend(self) -> None:
+        with patch("bilibot.qwen_asr_cli.bilibot_main", return_value=0) as delegated:
+            rc = qwen3_asr_main(["meeting.m4a", "--quiet"])
+
+        self.assertEqual(rc, 0)
+        delegated.assert_called_once_with(["asr", "meeting.m4a", "--quiet", "--asr-backend", "qwen3"])
 
 
 class LocalAsrStorageTests(unittest.TestCase):
@@ -104,6 +149,24 @@ class QwenAsrBackendTests(unittest.TestCase):
         self.assertEqual(_resolve_language("zh"), "Chinese")
         self.assertEqual(_resolve_language("en"), "English")
         self.assertIsNone(_resolve_language("auto"))
+
+    def test_normalize_time_stamps_accepts_upstream_items_and_offsets_chunks(self) -> None:
+        items = [SimpleNamespace(text="hello", start_time=0.25, end_time=0.75)]
+
+        self.assertEqual(
+            _normalize_time_stamps(items, offset=300.0),
+            [{"text": "hello", "start": 300.25, "end": 300.75}],
+        )
+
+    def test_resolve_forced_aligner_finds_project_local_checkpoint(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            aligner = root / ".models" / "Qwen3-ForcedAligner-0.6B"
+            aligner.mkdir(parents=True)
+            with patch("bilibot.qwen_asr_backend.Path.cwd", return_value=root):
+                resolved = _resolve_forced_aligner_model(Settings(), "Qwen/Qwen3-ASR-1.7B")
+
+        self.assertEqual(resolved, str(aligner.resolve()))
 
 
 class GgufAsrBackendTests(unittest.TestCase):

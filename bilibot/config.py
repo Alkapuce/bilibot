@@ -43,6 +43,8 @@ class Settings:
     asr_backend: str = "auto"
     asr_preset: str = "auto"
     asr_model: str = ""
+    asr_forced_aligner_model: str = ""
+    asr_return_time_stamps: bool | None = None
     asr_device: str = ""
     asr_compute_type: str = ""
     asr_task: str = "transcribe"
@@ -110,6 +112,11 @@ def load_settings(**overrides: Any) -> Settings:
         asr_backend=os.getenv("ASR_BACKEND", Settings.asr_backend),
         asr_preset=os.getenv("ASR_PRESET", Settings.asr_preset),
         asr_model=os.getenv("ASR_MODEL", os.getenv("WHISPER_MODEL", Settings.asr_model)),
+        asr_forced_aligner_model=os.getenv(
+            "ASR_FORCED_ALIGNER_MODEL",
+            os.getenv("QWEN3_FORCED_ALIGNER_MODEL", Settings.asr_forced_aligner_model),
+        ),
+        asr_return_time_stamps=_env_optional_bool("ASR_RETURN_TIME_STAMPS"),
         asr_device=os.getenv("ASR_DEVICE", os.getenv("WHISPER_DEVICE", Settings.asr_device)),
         asr_compute_type=os.getenv(
             "ASR_COMPUTE_TYPE",

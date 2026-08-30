@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import logging
+import math
 import subprocess
+import sys
 import tempfile
+import types
+import importlib.machinery
+import importlib.util
 from pathlib import Path
+from typing import Any
 
 from .config import Settings
 from .models import Transcript, TranscriptSegment
@@ -19,6 +25,8 @@ QWEN3_MODEL_IDS: dict[str, str] = {
 }
 
 QWEN3_DEFAULT_MODEL = "qwen3-asr-1.7b"
+QWEN3_DEFAULT_FORCED_ALIGNER = "Qwen/Qwen3-ForcedAligner-0.6B"
+QWEN3_LOCAL_FORCED_ALIGNER_DIR = "Qwen3-ForcedAligner-0.6B"
 QWEN3_CHUNK_SECONDS = 300
 QWEN3_LANGUAGE_ALIASES: dict[str, str] = {
     "zh": "Chinese",
@@ -37,6 +45,7 @@ QWEN3_LANGUAGE_ALIASES: dict[str, str] = {
 
 
 def _check_qwen_asr() -> bool:
+    _install_optional_runtime_shims()
     try:
         import qwen_asr  # noqa: F401
         import torch  # noqa: F401
@@ -58,16 +67,57 @@ def _resolve_model(settings: Settings) -> str:
     return model
 
 
+def _resolve_forced_aligner_model(settings: Settings, asr_model: str) -> str:
+    """Resolve the aligner, preferring a local checkpoint next to the ASR model."""
+    configured = settings.asr_forced_aligner_model
+    if configured:
+        path = Path(configured).expanduser()
+        return str(path.resolve()) if path.is_dir() else configured
+
+    asr_path = Path(asr_model)
+    candidates = [Path.cwd() / ".models" / QWEN3_LOCAL_FORCED_ALIGNER_DIR]
+    if asr_path.is_dir():
+        candidates.append(asr_path.parent / QWEN3_LOCAL_FORCED_ALIGNER_DIR)
+    for candidate in candidates:
+        if candidate.is_dir():
+            return str(candidate.resolve())
+    return QWEN3_DEFAULT_FORCED_ALIGNER
+
+
 def _resolve_device(settings: Settings) -> str:
-    if settings.asr_device:
-        return settings.asr_device
+    requested = (settings.asr_device or "").strip().lower()
     try:
         import torch
+        if requested in ("", "auto"):
+            if torch.cuda.is_available():
+                return "cuda:0"
+            return "cpu"
+        if requested == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError("ASR_DEVICE=cuda 但 torch.cuda.is_available() 为 False")
+            return "cuda:0"
+        if requested.startswith("cuda") and not torch.cuda.is_available():
+            raise RuntimeError(f"ASR_DEVICE={settings.asr_device} 但 torch.cuda.is_available() 为 False")
+        if requested:
+            return settings.asr_device
         if torch.cuda.is_available():
             return "cuda:0"
     except ImportError:
         pass
     return "cpu"
+
+
+def _resolve_dtype(settings: Settings, device: str):
+    import torch
+
+    compute_type = (settings.asr_compute_type or "").strip().lower()
+    if compute_type in ("bf16", "bfloat16"):
+        return torch.bfloat16
+    if compute_type in ("fp16", "float16", "half"):
+        return torch.float16
+    if compute_type in ("fp32", "float32", "full"):
+        return torch.float32
+    return torch.bfloat16 if device.startswith("cuda") else torch.float32
 
 
 def _resolve_language(language: str) -> str | None:
@@ -91,20 +141,29 @@ def transcribe(
         )
 
     import torch
+    _install_optional_runtime_shims()
     from qwen_asr import Qwen3ASRModel
 
     model_id = _resolve_model(settings)
     device = _resolve_device(settings)
-    dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
+    dtype = _resolve_dtype(settings, device)
+    aligner_requested = settings.asr_return_time_stamps is not False and (
+        settings.asr_return_time_stamps is True or bool(settings.asr_forced_aligner_model)
+    )
+    aligner_id = _resolve_forced_aligner_model(settings, model_id) if aligner_requested else ""
 
     emit(progress, "task_start", "asr_model_load", f"加载 Qwen3-ASR 模型：{model_id}")
-    model = Qwen3ASRModel.from_pretrained(
-        model_id,
-        dtype=dtype,
-        device_map=device,
-        max_inference_batch_size=1,
-        max_new_tokens=1024,
-    )
+    model_kwargs: dict[str, Any] = {
+        "dtype": dtype,
+        "device_map": device,
+        "max_inference_batch_size": 1,
+        "max_new_tokens": 1024,
+    }
+    if aligner_id:
+        model_kwargs["forced_aligner"] = aligner_id
+        model_kwargs["forced_aligner_kwargs"] = {"dtype": dtype, "device_map": device}
+        emit(progress, "log", "asr_model_load", f"加载 Qwen3-ForcedAligner：{aligner_id}")
+    model = Qwen3ASRModel.from_pretrained(model_id, **model_kwargs)
     emit(progress, "task_done", "asr_model_load", f"Qwen3-ASR 模型已加载：{model_id}")
 
     language = _resolve_language(settings.language)
@@ -115,6 +174,7 @@ def transcribe(
         if chunk_paths:
             segments: list[TranscriptSegment] = []
             languages: list[str] = []
+            time_stamps: list[dict[str, Any]] = []
             previous_text = ""
             for index, (chunk_path, start, end) in enumerate(chunk_paths, start=1):
                 emit(
@@ -125,7 +185,12 @@ def transcribe(
                     completed=index - 1,
                     total=len(chunk_paths),
                 )
-                results = model.transcribe(audio=str(chunk_path), context=previous_text[-500:], language=language)
+                results = model.transcribe(
+                    audio=str(chunk_path),
+                    context=previous_text[-500:],
+                    language=language,
+                    return_time_stamps=aligner_requested,
+                )
                 if not results:
                     continue
                 r = results[0]
@@ -133,6 +198,7 @@ def transcribe(
                 if text:
                     segments.append(TranscriptSegment(start=start, end=end, text=text))
                     previous_text += text
+                time_stamps.extend(_normalize_time_stamps(getattr(r, "time_stamps", None), offset=start))
                 if r.language:
                     languages.append(r.language)
             if not segments:
@@ -144,11 +210,17 @@ def transcribe(
                 "asr_transcribe",
                 f"Qwen3-ASR 识别完成：{detected_lang}，{len(segments)} 段",
             )
-            return Transcript(source=f"qwen3/{model_id}", language=detected_lang, segments=segments)
+            return Transcript(
+                source=f"qwen3:{model_id}",
+                language=detected_lang,
+                segments=segments,
+                time_stamps=time_stamps,
+            )
 
     results = model.transcribe(
         audio=audio_path,
         language=language,
+        return_time_stamps=aligner_requested,
     )
     if not results:
         raise RuntimeError("Qwen3-ASR returned empty result")
@@ -157,22 +229,10 @@ def transcribe(
     text = r.text.strip()
     detected_lang = r.language or "zh"
 
+    time_stamps = _normalize_time_stamps(getattr(r, "time_stamps", None))
     segments: list[TranscriptSegment] = []
-    if hasattr(r, "time_stamps") and r.time_stamps:
-        for ts in r.time_stamps:
-            seg_text = str(ts.get("text", "")).strip()
-            if not seg_text:
-                continue
-            start = float(ts.get("start", 0))
-            end = float(ts.get("end", 0))
-            if end <= 0 and start > 0:
-                end = start + 1.0
-            if start < 0 and end > 0:
-                start = max(0.0, end - 1.0)
-            if start >= 0 and end >= 0 and start <= end:
-                segments.append(TranscriptSegment(start=start, end=end, text=seg_text))
 
-    if not segments and text:
+    if text:
         segments = [TranscriptSegment(start=0.0, end=0.0, text=text)]
 
     emit(
@@ -181,7 +241,12 @@ def transcribe(
         "asr_transcribe",
         f"Qwen3-ASR 识别完成：{detected_lang}，{len(segments)} 段",
     )
-    return Transcript(source=f"qwen3/{model_id}", language=detected_lang, segments=segments)
+    return Transcript(
+        source=f"qwen3:{model_id}",
+        language=detected_lang,
+        segments=segments,
+        time_stamps=time_stamps,
+    )
 
 
 def _split_audio_for_qwen(audio_path: str, chunk_seconds: int, output_dir: Path) -> list[tuple[Path, float, float]]:
@@ -255,6 +320,86 @@ def _merge_detected_languages(languages: list[str]) -> str:
     if not languages:
         return "zh"
     return max(set(languages), key=languages.count)
+
+
+def _normalize_time_stamps(items: Any, *, offset: float = 0.0) -> list[dict[str, Any]]:
+    """Convert qwen-asr aligner objects or dicts into stable JSON records."""
+    normalized: list[dict[str, Any]] = []
+    for item in items or []:
+        if isinstance(item, dict):
+            text = item.get("text", "")
+            start = item.get("start", item.get("start_time", 0.0))
+            end = item.get("end", item.get("end_time", 0.0))
+        else:
+            text = getattr(item, "text", "")
+            start = getattr(item, "start_time", getattr(item, "start", 0.0))
+            end = getattr(item, "end_time", getattr(item, "end", 0.0))
+        text = str(text).strip()
+        if not text:
+            continue
+        try:
+            start_value = float(start) + offset
+            end_value = float(end) + offset
+        except (TypeError, ValueError):
+            continue
+        if start_value < 0 or end_value < start_value:
+            continue
+        normalized.append({"text": text, "start": start_value, "end": end_value})
+    return normalized
+
+
+def _install_optional_runtime_shims() -> None:
+    """Provide tiny fallbacks for optional qwen-asr imports we do not use.
+
+    The upstream qwen-asr package imports demo/alignment helpers from its package
+    root. Plain ASR inference only needs audio loading/resampling, while forced
+    alignment pulls in nagisa/soynlp. Keep the runtime lean by stubbing the
+    unused alignment import and replacing librosa with soundfile+scipy when
+    librosa is not installed.
+    """
+    if importlib.util.find_spec("librosa") is None and "librosa" not in sys.modules:
+        sys.modules["librosa"] = _build_librosa_shim()
+    if importlib.util.find_spec("nagisa") is None and "nagisa" not in sys.modules:
+        module = types.ModuleType("nagisa")
+        module.__spec__ = importlib.machinery.ModuleSpec("nagisa", loader=None)
+        module.tagging = lambda text: types.SimpleNamespace(words=list(str(text)))
+        sys.modules["nagisa"] = module
+
+
+def _build_librosa_shim() -> types.ModuleType:
+    module = types.ModuleType("librosa")
+    module.__spec__ = importlib.machinery.ModuleSpec("librosa", loader=None)
+
+    def load(path: str, *, sr: int | None = None, mono: bool = True):
+        import numpy as np
+        import soundfile as sf
+
+        audio, source_sr = sf.read(path, dtype="float32", always_2d=False)
+        audio = np.asarray(audio, dtype=np.float32)
+        if audio.ndim == 2:
+            if mono:
+                audio = audio.mean(axis=1)
+            else:
+                audio = audio.T
+        if sr is not None and int(source_sr) != int(sr):
+            audio = resample(audio, orig_sr=int(source_sr), target_sr=int(sr))
+            source_sr = sr
+        return audio.astype(np.float32, copy=False), int(source_sr)
+
+    def resample(y, *, orig_sr: int, target_sr: int):
+        import numpy as np
+        from scipy.signal import resample_poly
+
+        if int(orig_sr) == int(target_sr):
+            return np.asarray(y, dtype=np.float32)
+        factor = math.gcd(int(orig_sr), int(target_sr))
+        up = int(target_sr) // factor
+        down = int(orig_sr) // factor
+        return resample_poly(y, up, down, axis=-1).astype(np.float32, copy=False)
+
+    module.load = load
+    module.resample = resample
+    return module
 
 
 def transcribe_url(

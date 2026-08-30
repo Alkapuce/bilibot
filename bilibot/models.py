@@ -24,6 +24,7 @@ class Transcript:
     source: TranscriptSource
     language: str
     segments: list[TranscriptSegment] = field(default_factory=list)
+    time_stamps: list[dict[str, Any]] = field(default_factory=list)
     postprocessed: bool = False
     postprocess_model: str = ""
 
@@ -32,13 +33,23 @@ class Transcript:
         return "\n".join(segment.to_line() for segment in self.segments)
 
     def to_markdown(self) -> str:
-        source_label = "Bilibili subtitle" if self.source == "bilibili_subtitle" else "Whisper ASR"
+        if self.source == "bilibili_subtitle":
+            source_label = "Bilibili subtitle"
+        elif self.source.startswith("qwen3-gguf"):
+            source_label = "Qwen3-ASR GGUF"
+        elif self.source.startswith("qwen3:") or self.source.startswith("qwen3/"):
+            source_label = "Qwen3-ASR"
+        elif self.source.startswith("whisper"):
+            source_label = "Whisper ASR"
+        else:
+            source_label = self.source or "unknown"
         lines = [
             "# Transcript",
             "",
             f"- Source: {source_label}",
             f"- Language: {self.language or 'unknown'}",
             f"- Segments: {len(self.segments)}",
+            f"- Time stamps: {len(self.time_stamps)}",
             f"- Postprocessed: {'yes' if self.postprocessed else 'no'}",
             "",
             "## Full Text",

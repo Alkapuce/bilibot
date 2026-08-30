@@ -104,6 +104,9 @@ def _postprocess_transcript_impl(
         source=transcript.source,
         language=transcript.language,
         segments=new_segments,
+        # Text edits invalidate word/character alignment; the pipeline keeps
+        # the original timestamped transcript as raw_transcript.
+        time_stamps=[],
         postprocessed=True,
         postprocess_model=llm.last_model or llm_settings.llm_model,
     )

@@ -141,6 +141,20 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     asr.add_argument("--asr-preset", choices=ASR_PRESETS, help="ASR preset, default: auto")
     asr.add_argument("--asr-model", help="ASR model name, HuggingFace path, or local dir")
     asr.add_argument("--whisper-model", dest="asr_model", help="Alias for --asr-model")
+    asr.add_argument(
+        "--forced-aligner-model",
+        "--asr-forced-aligner-model",
+        dest="asr_forced_aligner_model",
+        help="Qwen3-ForcedAligner checkpoint path or HuggingFace model id",
+    )
+    asr.add_argument(
+        "--timestamps",
+        "--return-time-stamps",
+        dest="asr_return_time_stamps",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Return Qwen3 ForcedAligner word/character timestamps",
+    )
     asr.add_argument("--asr-device", help="ASR device: cpu, cuda, or auto")
     asr.add_argument("--whisper-device", dest="asr_device", help="Alias for --asr-device")
     asr.add_argument("--asr-compute-type", help="ASR compute type, e.g. int8, float16, int8_float16")
