@@ -65,10 +65,10 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=dedent(
             """\
             examples:
-              bilibot BV1WdokBNEcn
-              bilibot 1WdokBNEcn --no-notes
-              bilibot summarize https://www.bilibili.com/video/BV1WdokBNEcn/ --asr-preset accurate
-              bilibot summarize BV1WdokBNEcn --postprocess-subtitles --subtitle-postprocess-model deepseek-v4-pro
+              bilibot BVxxxx
+              bilibot xxxx --no-notes
+              bilibot summarize https://www.bilibili.com/video/BVxxxx/ --asr-preset accurate
+              bilibot summarize BVxxxx --postprocess-subtitles --subtitle-postprocess-model deepseek-v4-pro
               bilibot asr ./meeting.m4a --asr-backend auto
               bilibot doctor
             """
